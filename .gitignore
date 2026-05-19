@@ -1,0 +1,18 @@
+# Ignore large files
+Dataset_2_Models/Colonoscopy LLM combined-Training Dataset 2 Testing Mixed.ipynb
+Dataset_2_Models/Colonoscopy LLM combined-Training Dataset 2 Testing Public.ipynb
+Mixed_Dataset_Models/Colonoscopy LLM combined-Training Mixed Testing Dataset 1.ipynb
+Mixed_Dataset_Models/Colonoscopy LLM combined-Training Mixed Testing 2.ipynb
+Dataset_1_Models/Colonoscopy LLM combined-Training Dataset 1 Testing Mixed.ipynb
+
+# Ignore unconfirmed downloads and macOS system files
+*.crdownload
+.DS_Store
+
+# Ignore files with secrets
+Mixed_Dataset_Models/Colonoscopy LLM combined-Training Mixed Datasaet Testing 3.ipynb
+Public_Dataset_Models/Colonoscopy LLM combined-Training Public Testing Dataset 2.ipynb
+Dataset_2_Models/Colonoscopy Combined-Train Dataset 2 Testing 1.ipynb
+Dataset_2_Models/Colonoscopy LLM combined-Training Dataset 2 Testing 1-Copy1.ipynb
+Dataset_2_Models/Colonoscopy LLM combined-Training Dataset 2 Testing 1.ipynb
+Mixed_Dataset_Models/Colonoscopy LLM combined-Training Mixed Datasaet Testing 3-Copy1.ipynb

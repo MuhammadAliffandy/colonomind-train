@@ -76,27 +76,88 @@ python src/train.py \
 - `--batch_size`: (Optional) Default is 16.
 - `--epochs`: (Optional) Default is 20.
 
-### 4. Output Artifacts
-After training completes, the `--output_dir` will contain:
-- `best_hybrid_model.h5`: The trained Mod-SE(2) CNN weights.
-- `scaler.pkl`: The StandardScaler fitted on your training handcrafted features.
-- `label_encoder.pkl`: The encoder used for your dataset classes.
-- `umap_model.pkl`: The fitted UMAP reducer for hybrid decision tree inference.
+### 5. Batch Training (All Dataset Combinations)
+To train across **every** dataset combination at once (intra-domain, cross-domain, and multi-domain), use the batch script:
+
+```bash
+chmod +x run_all_experiments.sh
+./run_all_experiments.sh
+```
+
+This will automatically run **all experiments** and organize results into:
+```text
+results/
+├── intra/                          # Same dataset train & test
+│   ├── dataset_1/
+│   ├── dataset_2/
+│   ├── public/
+│   └── mixed/
+├── cross/                          # Different dataset train & test
+│   ├── train_dataset_1_test_dataset_2/
+│   ├── train_dataset_1_test_public/
+│   ├── train_dataset_2_test_dataset_1/
+│   └── ... (12 combinations total)
+└── multi/                          # Mixed-domain training
+    ├── train_mixed_test_dataset_1/
+    ├── train_mixed_test_dataset_2/
+    └── train_mixed_test_public/
+```
+
+Each folder contains: `best_hybrid_model.h5`, `scaler.pkl`, `label_encoder.pkl`, `umap_model.pkl`.
 
 ---
 
-## 📊 Paper Evaluations Framework
+## 📊 Paper Evaluations Workflow
 
-To satisfy reviewer requirements and generate paper-ready figures and tables, we have a dedicated `paper_evaluations/` directory.
+Follow this order to generate all paper-ready figures and tables:
 
-- **`data_stats.py`**: Generates exclusion flowcharts (N=2536 -> N=997) and Dataset Distribution tables (Extended Data Tables 2a & 2b).
-- **`run_ablation.py`**: Runs the 6 ablation scenarios across intra, cross, and multi-domain settings.
-- **`run_baselines.py`**: Compares our Hybrid model against standard architectures (ResNet, DenseNet, EfficientNet, ConvNeXt, ViT).
-- **`run_analysis.py`**: Calculates 95% Confidence Intervals, Sensitivity/Specificity per class, plots Confusion Matrices, and generates Handcrafted Feature Importance charts.
-- **`run_benchmark.py`**: Measures computational performance (Model Size in MB, Total Parameters, Hardware specs, and Inference Latency in ms).
-- **`architecture.md`**: Contains a Mermaid.js diagram of the end-to-end system architecture.
+### Step 1: Train Models
+```bash
+# Train a single experiment
+python src/train.py --train_dir dataset_1 --test_dir dataset_2 --output_dir ./results/cross/train_dataset_1_test_dataset_2
 
-*To run any of these, simply execute them via Python from the root directory.*
+# Or train ALL experiments at once
+./run_all_experiments.sh
+```
+
+### Step 2: Run Evaluations (no training needed)
+```bash
+# Data exclusion flowchart & distribution tables
+python paper_evaluations/data_stats.py
+```
+
+### Step 3: Run Evaluations (needs trained model)
+```bash
+# Confusion Matrix, 95% CI, Sensitivity/Specificity, Feature Importance
+python paper_evaluations/run_analysis.py --model_dir ./results/cross/train_dataset_1_test_dataset_2
+
+# Computational performance (params, latency, model size)
+python paper_evaluations/run_benchmark.py --model_path ./results/cross/train_dataset_1_test_dataset_2/best_hybrid_model.h5
+```
+
+### Step 4: Baselines & Ablation (trains its own models)
+```bash
+# Compare against ResNet, DenseNet, EfficientNet, ViT
+python paper_evaluations/run_baselines.py --model resnet
+
+# Run ablation scenarios (1-6)
+python paper_evaluations/run_ablation.py --scenario 1 --domain cross
+```
+
+### Step 5: Architecture Diagram
+Open `paper_evaluations/architecture.md` in any Mermaid-compatible viewer (GitHub, VS Code, etc.).
+
+**Available Scripts:**
+| Script | Needs Training First? | Description |
+|---|---|---|
+| `data_stats.py` | ❌ No | Exclusion flowchart & data split tables |
+| `run_baselines.py` | ❌ No (trains its own) | ResNet, DenseNet, EfficientNet, ViT comparison |
+| `run_ablation.py` | ❌ No (trains its own) | 6 ablation scenarios |
+| `run_analysis.py` | ✅ Yes | CM, 95% CI, Sensitivity/Specificity, Feature Importance |
+| `run_benchmark.py` | ✅ Yes | Model size, params, inference latency |
+| `architecture.md` | ❌ No | End-to-end system diagram |
+
+*Run all scripts from the project root directory (`~/Clara/colono_train/`).*
 
 ---
 

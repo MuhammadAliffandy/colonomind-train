@@ -9,12 +9,14 @@ Welcome to the **Colonomind Training Repository**. This repository has been rece
 ```text
 .
 ├── Legacy_Notebooks/      # Archived Jupyter Notebooks from previous experiments.
+├── paper_evaluations/     # Scripts for generating paper-ready results
 ├── src/                   # Core modular Python code
-│   ├── config.py          # Global parameters (IMG_SIZE, WAVELET)
+│   ├── config.py          # Global parameters, server paths, dataset registry
 │   ├── features.py        # Handcrafted feature extraction (Wavelet, GLCM)
 │   ├── data_loader.py     # Image loading, preprocessing, and feature binding
 │   ├── model.py           # Mod-SE(2) CNN layers and Hybrid Model architecture
 │   └── train.py           # Master script for executing training runs
+├── antigravity.md         # AI assistant instruction log
 ├── requirements.txt       # Python package dependencies
 └── README.md              # This file
 ```
@@ -30,34 +32,46 @@ To ensure all collaborators are using the exact same environment, please install
 pip install -r requirements.txt
 ```
 
-### 2. Dataset Preparation
-Ensure your datasets are unzipped and organized locally. **Do not commit datasets to GitHub.**
-Expected dataset folder structure:
-```text
-Dataset_Name/
-├── class_0/
-│   ├── img1.jpg
-│   └── img2.jpg
-├── class_1/
-└── class_2/
-```
+### 2. Server Environment (NTU DGX)
+On the NTU DGX server, the following paths are pre-configured:
+
+| Item | Path |
+|---|---|
+| **Project Root** | `~/Clara/colono_train/` |
+| **Dataset Root** | `~/Clara/new_drive/Dataset_Extracted/Dataset+Code/` |
+
+**Available Datasets (registered in `src/config.py`):**
+| Short Name | Folder |
+|---|---|
+| `dataset_1` | `MES classification_20250313` |
+| `dataset_2` | `MES classification_20250724` |
+| `public` | `MES_Colonoscopy Public Dataset` |
+| `mixed` | `MES Mixed Data` |
 
 ### 3. How to Train a Model
 You no longer need to copy/paste Jupyter Notebooks for new experiments! Use the unified `train.py` script. It automatically handles SMOTE balancing, UMAP projections, CNN training, and artifact saving.
 
-**Example Command (NTU DGX Server):**
+**Option A — Using short dataset names (recommended on DGX):**
 ```bash
 python src/train.py \
-  --train_dir "../new_drive/Dataset_Extracted/Dataset+Code/MES classification_20250313" \
-  --test_dir "../new_drive/Dataset_Extracted/Dataset+Code/MES classification_20250724" \
-  --output_dir "./results/Experiment_Name" \
+  --train_dir dataset_1 \
+  --test_dir dataset_2 \
+  --output_dir ./results/train1_test2
+```
+
+**Option B — Using full custom paths:**
+```bash
+python src/train.py \
+  --train_dir ~/Clara/new_drive/Dataset_Extracted/Dataset+Code/"MES classification_20250313" \
+  --test_dir ~/Clara/new_drive/Dataset_Extracted/Dataset+Code/"MES classification_20250724" \
+  --output_dir ./results/train1_test2 \
   --batch_size 16 \
   --epochs 20
 ```
 
 #### Command Arguments:
-- `--train_dir`: Absolute or relative path to the training dataset folder.
-- `--test_dir`: Absolute or relative path to the testing dataset folder.
+- `--train_dir`: A registered short name (`dataset_1`, `dataset_2`, `public`, `mixed`) or an absolute/relative path.
+- `--test_dir`: Same as above.
 - `--output_dir`: Path where the trained models and artifacts will be saved.
 - `--batch_size`: (Optional) Default is 16.
 - `--epochs`: (Optional) Default is 20.

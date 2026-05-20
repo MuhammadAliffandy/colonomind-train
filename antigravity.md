@@ -15,3 +15,15 @@ This file serves as a memory and instruction log for the Antigravity AI assistan
 ## 3. Collaboration & Documentation
 - Whenever a major structural change is made (like adding a new evaluation metric), **always update the `README.md`** to reflect how the team should run the new code.
 - Ensure any python scripts intended for team use include `argparse` for easy CLI execution.
+
+## 4. Server Environment (NTU DGX)
+- **Server**: NTU DGX (GPU cluster)
+- **Project Location**: `~/Clara/colono_train/`
+- **Dataset Location**: `~/Clara/new_drive/Dataset_Extracted/Dataset+Code/`
+- **Dataset Registry** (defined in `src/config.py`):
+  - `dataset_1` → `MES classification_20250313`
+  - `dataset_2` → `MES classification_20250724`
+  - `public` → `MES_Colonoscopy Public Dataset`
+  - `mixed` → `MES Mixed Data`
+- When writing training commands or scripts, always use the short dataset names (e.g., `dataset_1`) instead of hardcoding full paths. The `resolve_dataset_path()` function in `train.py` handles the resolution.
+- If a new dataset is added to the server, register it in the `DATASETS` dictionary in `src/config.py`.

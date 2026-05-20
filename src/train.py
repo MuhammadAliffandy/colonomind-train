@@ -17,9 +17,18 @@ import umap
 import itertools
 import tqdm
 
-from src.config import IMG_SIZE
+from src.config import IMG_SIZE, DATASETS
 from src.data_loader import load_dataset
 from src.model import build_hybrid_model
+
+def resolve_dataset_path(name_or_path):
+    """Resolves a dataset short name (e.g. 'dataset_1') to its full server path,
+    or returns the path as-is if it's already a valid directory."""
+    if name_or_path in DATASETS:
+        resolved = DATASETS[name_or_path]
+        print(f"  Resolved '{name_or_path}' -> {resolved}")
+        return resolved
+    return name_or_path
 
 def focal_loss(gamma=2., alpha=0.25):
     def loss(y_true, y_pred):
@@ -32,10 +41,13 @@ def focal_loss(gamma=2., alpha=0.25):
 def main(args):
     os.makedirs(args.output_dir, exist_ok=True)
     
-    print(f"Loading training data from {args.train_dir}...")
-    X_img_train_raw, X_feat_train_raw, y_train_label, img_paths_train = load_dataset(args.train_dir)
-    print(f"Loading testing data from {args.test_dir}...")
-    X_img_test_raw,  X_feat_test_raw,  y_test_label,  img_paths_test  = load_dataset(args.test_dir)
+    train_path = resolve_dataset_path(args.train_dir)
+    test_path  = resolve_dataset_path(args.test_dir)
+    
+    print(f"Loading training data from {train_path}...")
+    X_img_train_raw, X_feat_train_raw, y_train_label, img_paths_train = load_dataset(train_path)
+    print(f"Loading testing data from {test_path}...")
+    X_img_test_raw,  X_feat_test_raw,  y_test_label,  img_paths_test  = load_dataset(test_path)
     
     X_img_train = X_img_train_raw.astype(np.float32) / 255.0
     X_img_test  = X_img_test_raw.astype(np.float32) / 255.0
@@ -119,10 +131,17 @@ def main(args):
     print("Optimization finished. Artifacts saved.")
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description="Colonomind Model Training Script")
-    parser.add_argument('--train_dir', type=str, required=True, help="Path to training dataset folder")
-    parser.add_argument('--test_dir', type=str, required=True, help="Path to testing dataset folder")
-    parser.add_argument('--output_dir', type=str, required=True, help="Path to save model and artifacts")
+    dataset_keys = ", ".join(DATASETS.keys())
+    parser = argparse.ArgumentParser(
+        description="Colonomind Model Training Script",
+        epilog=f"Available dataset short names: {dataset_keys}"
+    )
+    parser.add_argument('--train_dir', type=str, required=True,
+                        help=f"Dataset short name or full path. Short names: {dataset_keys}")
+    parser.add_argument('--test_dir', type=str, required=True,
+                        help=f"Dataset short name or full path. Short names: {dataset_keys}")
+    parser.add_argument('--output_dir', type=str, required=True,
+                        help="Path to save model and artifacts")
     parser.add_argument('--batch_size', type=int, default=16, help="Batch size for training")
     parser.add_argument('--epochs', type=int, default=20, help="Number of training epochs")
     

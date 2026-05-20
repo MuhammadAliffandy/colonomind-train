@@ -102,7 +102,11 @@ def SE2LiftingLayer(x):
 
 def create_SE2CNN_model(input_shape, num_classes, dropout_rate=0.5):
     input_layer = Input(shape=input_shape)
-    x = input_layer
+    
+    # On-the-fly Image Augmentation to prevent overfitting
+    x = tf.keras.layers.RandomFlip("horizontal_and_vertical")(input_layer)
+    x = tf.keras.layers.RandomRotation(0.2)(x)
+    
     x = GroupConv2D(33, (3, 3))(x)
     x = SE2MaxPooling2D()(x)
     x = Dropout(dropout_rate)(x)
@@ -122,12 +126,16 @@ def create_SE2CNN_model(input_shape, num_classes, dropout_rate=0.5):
     x = SE2MaxPooling2D()(x)
     x = Dropout(dropout_rate)(x)
     x = SE2LiftingLayer(x)
-    x = tf.keras.layers.Flatten()(x)
-    x = Dense(1056, activation='relu')(x)
+    
+    # Use GlobalAveragePooling2D instead of Flatten to prevent parameter explosion
+    x = tf.keras.layers.GlobalAveragePooling2D()(x)
+    
+    # Deep Feature Representation (No Softmax here!)
+    x = Dense(256, activation='relu')(x)
     x = BatchNormalization()(x)
     x = Dropout(dropout_rate)(x)
-    output = Dense(num_classes, activation='softmax')(x)
-    model = Model(inputs=input_layer, outputs=output)
+    
+    model = Model(inputs=input_layer, outputs=x)
     return model
 
 def build_hybrid_model(image_input_shape, feat_input_shape, umap_feat_shape, num_classes, dropout_rate=0.4):

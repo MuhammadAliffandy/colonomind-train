@@ -1,0 +1,55 @@
+# End-to-End System Architecture
+
+This diagram illustrates the complete workflow of the Colonomind Hybrid Model, starting from the raw input image through to the final Mucosal Healing (MES) prediction.
+
+```mermaid
+graph TD
+    %% Input Layer
+    Input[Raw Colonoscopy Image N=2536] --> Exclusion{Quality Exclusion}
+    Exclusion -- Blur, Feces, Polyps --> Discard[Discarded N=1539]
+    Exclusion -- Clean Images --> CleanImg[Usable Images N=997]
+    
+    %% Preprocessing
+    CleanImg --> Crop[Central Crop 30:430, 200:550]
+    Crop --> Resize[Resize to 224x224]
+    
+    %% Three Parallel Branches
+    Resize --> CNN_Branch[Branch 1: Mod-SE2 CNN]
+    Resize --> Feature_Branch[Branch 2: Handcrafted Features]
+    
+    %% Branch 1 Details
+    CNN_Branch --> GConv1[GroupConv2D 32]
+    GConv1 --> GConv2[...GroupConv2D 1024]
+    GConv2 --> Lifting[SE2 Lifting Layer]
+    Lifting --> CNN_Dense[Dense 64 + BatchNorm]
+    
+    %% Branch 2 Details
+    Feature_Branch --> Wavelet[DWT Wavelet db1]
+    Feature_Branch --> GLCM[GLCM Texture]
+    Wavelet --> ConcatFeat[20 Handcrafted Features]
+    GLCM --> ConcatFeat
+    ConcatFeat --> Feat_Dense[Dense 64 + BatchNorm]
+    
+    %% Branch 3 Details (UMAP)
+    ConcatFeat --> SMOTE[SMOTE Balancing]
+    SMOTE --> UMAP[UMAP Dimensionality Reduction]
+    UMAP --> UMAP_Dense[Dense 32 + BatchNorm]
+    
+    %% Fusion
+    CNN_Dense --> Fusion((Concatenate))
+    Feat_Dense --> Fusion
+    UMAP_Dense --> Fusion
+    
+    %% Output
+    Fusion --> Dense128[Dense 128 + Dropout]
+    Dense128 --> Focal[Focal Loss & Softmax]
+    Focal --> Output[Final MES Prediction 0-3]
+```
+
+## Description of Components
+1. **Quality Exclusion**: Automated/Manual filtering to remove unusable frames.
+2. **Preprocessing**: Normalizing the region of interest.
+3. **Mod-SE(2) CNN**: A roto-translation equivariant network designed to capture morphological structures regardless of camera rotation.
+4. **Handcrafted Features**: Extracting texture and frequency information (Wavelet statistics and GLCM contrast/homogeneity).
+5. **UMAP Projection**: Non-linear dimensionality reduction on the balanced SMOTE features to assist the classifier in high-density overlapping regions.
+6. **Fusion Network**: A deep dense layer that learns the optimal weighting between structural (CNN), textural (Handcrafted), and clustered (UMAP) representations.

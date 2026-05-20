@@ -71,6 +71,21 @@ After training completes, the `--output_dir` will contain:
 
 ---
 
+## 📊 Paper Evaluations Framework
+
+To satisfy reviewer requirements and generate paper-ready figures and tables, we have a dedicated `paper_evaluations/` directory.
+
+- **`data_stats.py`**: Generates exclusion flowcharts (N=2536 -> N=997) and Dataset Distribution tables (Extended Data Tables 2a & 2b).
+- **`run_ablation.py`**: Runs the 6 ablation scenarios across intra, cross, and multi-domain settings.
+- **`run_baselines.py`**: Compares our Hybrid model against standard architectures (ResNet, DenseNet, EfficientNet, ConvNeXt, ViT).
+- **`run_analysis.py`**: Calculates 95% Confidence Intervals, Sensitivity/Specificity per class, plots Confusion Matrices, and generates Handcrafted Feature Importance charts.
+- **`run_benchmark.py`**: Measures computational performance (Model Size in MB, Total Parameters, Hardware specs, and Inference Latency in ms).
+- **`architecture.md`**: Contains a Mermaid.js diagram of the end-to-end system architecture.
+
+*To run any of these, simply execute them via Python from the root directory.*
+
+---
+
 ## 🤝 Team Collaboration Guidelines
 
 To keep this repository clean and lightweight for all team members, please adhere to the following rules:

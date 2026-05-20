@@ -261,7 +261,7 @@ if __name__ == '__main__':
     parser.add_argument('--split', type=int, nargs=3, default=[70, 15, 15],
                         help="Train/Val/Test split percentages (default: 70 15 15)")
     parser.add_argument('--batch_size', type=int, default=16, help="Batch size")
-    parser.add_argument('--epochs', type=int, default=20, help="Number of epochs")
+    parser.add_argument('--epochs', type=int, default=90, help="Number of epochs")
     
     args = parser.parse_args()
     

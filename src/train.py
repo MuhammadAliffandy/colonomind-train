@@ -143,7 +143,7 @@ if __name__ == '__main__':
     parser.add_argument('--output_dir', type=str, required=True,
                         help="Path to save model and artifacts")
     parser.add_argument('--batch_size', type=int, default=16, help="Batch size for training")
-    parser.add_argument('--epochs', type=int, default=20, help="Number of training epochs")
+    parser.add_argument('--epochs', type=int, default=90, help="Number of training epochs")
     
     args = parser.parse_args()
     main(args)

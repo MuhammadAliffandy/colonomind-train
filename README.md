@@ -76,6 +76,20 @@ python src/train.py \
 - `--batch_size`: (Optional) Default is 16.
 - `--epochs`: (Optional) Default is 20.
 
+### 4. Train on ALL Datasets Combined (Recommended for Paper)
+This merges all 4 datasets into one pool, performs a stratified train/val/test split, and trains the model. It also prints the **Extended Data Tables 2a & 2b** automatically.
+
+```bash
+python src/train_all.py --output_dir ./results/all_datasets
+```
+
+You can customize the split ratio:
+```bash
+python src/train_all.py --output_dir ./results/all_datasets --split 70 15 15 --epochs 50
+```
+
+This saves an additional `split_info.pkl` file containing exact image counts per class and per source for your paper tables.
+
 ### 5. Batch Training (All Dataset Combinations)
 To train across **every** dataset combination at once (intra-domain, cross-domain, and multi-domain), use the batch script:
 

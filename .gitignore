@@ -1,3 +1,18 @@
 # Ignore unconfirmed downloads and macOS system files
 *.crdownload
 .DS_Store
+
+# Feature extraction cache (auto-generated, do not commit)
+**/.cache/
+*.pkl
+
+# Training results and model weights
+results/
+logs/
+nohup.out
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+.env

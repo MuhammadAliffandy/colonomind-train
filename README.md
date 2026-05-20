@@ -45,11 +45,11 @@ Dataset_Name/
 ### 3. How to Train a Model
 You no longer need to copy/paste Jupyter Notebooks for new experiments! Use the unified `train.py` script. It automatically handles SMOTE balancing, UMAP projections, CNN training, and artifact saving.
 
-**Example Command:**
+**Example Command (NTU DGX Server):**
 ```bash
 python src/train.py \
-  --train_dir "./path/to/Train_Dataset" \
-  --test_dir "./path/to/Test_Dataset" \
+  --train_dir "../new_drive/Dataset_Extracted/Dataset+Code/MES classification_20250313" \
+  --test_dir "../new_drive/Dataset_Extracted/Dataset+Code/MES classification_20250724" \
   --output_dir "./results/Experiment_Name" \
   --batch_size 16 \
   --epochs 20

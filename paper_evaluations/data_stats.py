@@ -71,7 +71,7 @@ if __name__ == "__main__":
     # Task 1.2: Dataset Distribution Table
     # Replace these paths with your actual directories when running locally
     count_dataset_distribution(
-        train_dir="../MES classification_20250313",
+        train_dir="../new_drive/Dataset_Extracted/Dataset+Code/MES classification_20250313",
         val_dir=None, # Add validation dir if you have an explicit one
-        test_dir="../MES classification_20250724"
+        test_dir="../new_drive/Dataset_Extracted/Dataset+Code/MES classification_20250724"
     )

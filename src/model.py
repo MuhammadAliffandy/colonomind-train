@@ -71,18 +71,20 @@ def MultiRotationOperatorMatrixSparse(NiNj, Ntheta, periodicity=2 * np.pi, diskM
 
 def GroupConv2D(filters, kernel_size, strides=(1, 1), padding='same', groups=3):
     def layer(x):
-        group_list = []
+        # Use tf.split instead of Python slicing — avoids CUDA_ERROR_INVALID_HANDLE on GPU
         in_channels = x.shape[-1]
-        assert in_channels % groups == 0, f"Number of input channels ({in_channels}) must be divisible by groups ({groups})"
-        group_size = in_channels // groups
-        for i in range(groups):
-            x_group = x[:, :, :, i * group_size : (i + 1) * group_size]
-            group_conv = tf.keras.layers.Conv2D(filters // groups, kernel_size, strides=strides, padding=padding)(x_group)
-            group_list.append(group_conv)
-        x = Concatenate()(group_list)
-        x = BatchNormalization()(x)
-        x = tf.keras.layers.Activation('relu')(x)
-        return x
+        assert in_channels is not None and in_channels % groups == 0, \
+            f"Input channels ({in_channels}) must be divisible by groups ({groups})"
+        x_groups = tf.split(x, num_or_size_splits=groups, axis=-1)
+        group_list = [
+            tf.keras.layers.Conv2D(filters // groups, kernel_size,
+                                   strides=strides, padding=padding)(x_group)
+            for x_group in x_groups
+        ]
+        x_out = Concatenate()(group_list)
+        x_out = BatchNormalization()(x_out)
+        x_out = tf.keras.layers.Activation('relu')(x_out)
+        return x_out
     return layer
 
 def SE2MaxPooling2D(pool_size=(2, 2)):
@@ -91,8 +93,11 @@ def SE2MaxPooling2D(pool_size=(2, 2)):
     return layer
 
 def SE2LiftingLayer(x):
-    N, H, W, C = x.shape
-    assert C % 3 == 0, "Number of input channels must be divisible by 3"
+    # Use dynamic shape to avoid issues with None batch dim on GPU
+    shape = tf.shape(x)
+    static_shape = x.shape.as_list()
+    H, W, C = static_shape[1], static_shape[2], static_shape[3]
+    assert C is not None and C % 3 == 0, "Number of input channels must be divisible by 3"
     group_size = C // 3
     x = tf.keras.layers.Reshape((H, W, 3, group_size))(x)
     x = tf.keras.layers.Permute((1, 2, 4, 3))(x)

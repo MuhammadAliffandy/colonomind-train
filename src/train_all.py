@@ -41,6 +41,20 @@ from src.train import focal_loss
 def main(args):
     os.makedirs(args.output_dir, exist_ok=True)
     
+    # Check GPU/CUDA availability
+    gpus = tf.config.list_physical_devices('GPU')
+    print(f"\nTensorFlow Version: {tf.__version__}")
+    if gpus:
+        print(f"✅ GPU is detected and available for CUDA acceleration: {gpus}\n")
+        # Enable memory growth to avoid locking all GPU memory at once
+        try:
+            for gpu in gpus:
+                tf.config.experimental.set_memory_growth(gpu, True)
+        except RuntimeError as e:
+            print(e)
+    else:
+        print("⚠️ GPU is NOT detected by TensorFlow. Running on CPU instead.\n")
+    
     # =============================================
     # 1. LOAD & MERGE ALL DATASETS
     # =============================================

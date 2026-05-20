@@ -90,10 +90,10 @@ def SE2MaxPooling2D(pool_size=(2, 2)):
     return layer
 
 def SE2LiftingLayer(x):
-    # Use dynamic shape to avoid issues with None batch dim on GPU
-    shape = tf.shape(x)
-    static_shape = x.shape.as_list()
-    H, W, C = static_shape[1], static_shape[2], static_shape[3]
+    # Use static shape properties to avoid tf.shape() on KerasTensor
+    H = x.shape[1]
+    W = x.shape[2]
+    C = x.shape[3]
     assert C is not None and C % 3 == 0, "Number of input channels must be divisible by 3"
     group_size = C // 3
     x = tf.keras.layers.Reshape((H, W, 3, group_size))(x)

@@ -1,0 +1,15 @@
+numpy
+opencv-python
+tensorflow
+scikit-learn
+scikit-image
+imbalanced-learn
+PyWavelets
+scipy
+matplotlib
+umap-learn
+transformers
+seaborn
+pandas
+tqdm
+joblib

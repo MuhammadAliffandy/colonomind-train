@@ -1,0 +1,2 @@
+IMG_SIZE = (224, 224)
+WAVELET = 'db1'

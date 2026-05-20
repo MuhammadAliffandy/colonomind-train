@@ -71,25 +71,14 @@ def MultiRotationOperatorMatrixSparse(NiNj, Ntheta, periodicity=2 * np.pi, diskM
 
 def GroupConv2D(filters, kernel_size, strides=(1, 1), padding='same', groups=3):
     def layer(x):
-        in_channels = x.shape[-1]
-        assert in_channels is not None and in_channels % groups == 0, \
-            f"Input channels ({in_channels}) must be divisible by groups ({groups})"
-        group_size = in_channels // groups
-        # Use Lambda to wrap slicing — required for Keras Functional API
-        x_groups = [
-            tf.keras.layers.Lambda(
-                lambda t, s=i * group_size, e=(i + 1) * group_size: t[..., s:e]
-            )(x)
-            for i in range(groups)
-        ]
-        group_list = [
-            tf.keras.layers.Conv2D(
-                filters // groups, kernel_size,
-                strides=strides, padding=padding
-            )(x_group)
-            for x_group in x_groups
-        ]
-        x_out = Concatenate()(group_list)
+        # Native Keras Group Convolution — highly optimized and avoids graph splitting issues on GPU
+        x_out = tf.keras.layers.Conv2D(
+            filters=filters, 
+            kernel_size=kernel_size,
+            strides=strides, 
+            padding=padding,
+            groups=groups
+        )(x)
         x_out = BatchNormalization()(x_out)
         x_out = tf.keras.layers.Activation('relu')(x_out)
         return x_out

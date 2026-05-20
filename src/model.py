@@ -127,6 +127,13 @@ def create_SE2CNN_model(input_shape, num_classes, dropout_rate=0.5):
     x = Dropout(dropout_rate)(x)
     x = SE2LiftingLayer(x)
     
+    # SE2LiftingLayer outputs a 5D tensor (None, H, W, group_size, 3).
+    # We must reshape it to 4D (None, H, W, channels) before Global Average Pooling.
+    H_out = x.shape[1]
+    W_out = x.shape[2]
+    C_out = x.shape[3] * x.shape[4]
+    x = tf.keras.layers.Reshape((H_out, W_out, C_out))(x)
+    
     # Use GlobalAveragePooling2D instead of Flatten to prevent parameter explosion
     x = tf.keras.layers.GlobalAveragePooling2D()(x)
     

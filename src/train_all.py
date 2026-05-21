@@ -235,19 +235,85 @@ def main(args):
     )
     
     # =============================================
-    # 8. EVALUATE ON TEST SET
+    # 8. EVALUATE ON TEST SET (KERAS)
     # =============================================
-    print("\nEvaluating on Test Set...")
+    print("\nEvaluating Keras Model on Test Set...")
     test_loss, test_acc = model.evaluate(
         [X_img_test, X_feat_test_scaled, X_test_umap], y_test_cat, verbose=0
     )
-    print(f"  Test Accuracy: {test_acc:.4f}")
-    print(f"  Test Loss:     {test_loss:.4f}")
-    
+    print(f"  Keras Test Accuracy: {test_acc:.4f}")
+    print(f"  Keras Test Loss:     {test_loss:.4f}")
+
     # =============================================
-    # 9. SAVE EVERYTHING
+    # 9. SUPER AGENT (LightGBM on Deep Features)
+    # =============================================
+    print("\n=============================================")
+    print("9. TRAINING SUPER AGENT (LIGHTGBM ENSEMBLE)")
+    print("=============================================")
+    import scipy.stats
+    import lightgbm as lgb
+    from sklearn.metrics import accuracy_score
+    
+    # Extract Deep Features (using the layer right before the final Dense)
+    # model.layers[-2] is the Dropout layer outputting the 128 deep features
+    deep_feature_model = tf.keras.models.Model(inputs=model.inputs, outputs=model.layers[-2].output)
+    
+    print("Extracting Deep Features, Probabilities, and Entropy...")
+    X_deep_train = deep_feature_model.predict([X_img_train_bal, X_feat_train_bal, X_train_umap], verbose=0)
+    y_prob_train = model.predict([X_img_train_bal, X_feat_train_bal, X_train_umap], verbose=0)
+    X_entropy_train = scipy.stats.entropy(y_prob_train, axis=1).reshape(-1, 1)
+    
+    X_deep_test = deep_feature_model.predict([X_img_test, X_feat_test_scaled, X_test_umap], verbose=0)
+    y_prob_test = model.predict([X_img_test, X_feat_test_scaled, X_test_umap], verbose=0)
+    X_entropy_test = scipy.stats.entropy(y_prob_test, axis=1).reshape(-1, 1)
+    
+    X_agent_train = np.hstack([X_deep_train, y_prob_train, X_entropy_train])
+    X_agent_test = np.hstack([X_deep_test, y_prob_test, X_entropy_test])
+    
+    print(f"Agent Input Shape: {X_agent_train.shape}")
+    
+    lgb_params = {
+        'objective': 'multiclass',
+        'metric': 'multi_logloss',
+        'verbosity': -1,
+        'boosting_type': 'gbdt',
+        'n_estimators': 400, 
+        'learning_rate': 0.05,
+        'max_depth': 4,
+        'num_leaves': 15, 
+        'min_child_samples': 40, 
+        'lambda_l1': 10.0,
+        'lambda_l2': 10.0,
+        'feature_fraction': 0.6, 
+        'bagging_fraction': 0.7, 
+        'bagging_freq': 2,
+        'class_weight': 'balanced',
+        'n_jobs': -1,
+        'random_state': 42
+    }
+    
+    print("Training LightGBM Super Agent...")
+    super_agent = lgb.LGBMClassifier(**lgb_params)
+    y_test_ints = np.argmax(y_test_cat, axis=1)
+    
+    super_agent.fit(
+        X_agent_train, y_train_bal,
+        eval_set=[(X_agent_test, y_test_ints)],
+        callbacks=[lgb.early_stopping(50, verbose=False)]
+    )
+    
+    y_pred_agent_test = super_agent.predict(X_agent_test)
+    agent_test_acc = accuracy_score(y_test_ints, y_pred_agent_test)
+    
+    print("\n=============================================")
+    print(f" 🚀 SUPER AGENT TEST ACCURACY: {agent_test_acc:.4f} ")
+    print("=============================================\n")
+
+    # =============================================
+    # 10. SAVE EVERYTHING
     # =============================================
     model.save(os.path.join(args.output_dir, "best_hybrid_model.h5"))
+    super_agent.booster_.save_model(os.path.join(args.output_dir, "super_agent_lgbm.txt"))
     joblib.dump(scaler, os.path.join(args.output_dir, "scaler.pkl"))
     joblib.dump(le, os.path.join(args.output_dir, "label_encoder.pkl"))
     joblib.dump(umap_reducer, os.path.join(args.output_dir, "umap_model.pkl"))

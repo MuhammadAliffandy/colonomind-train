@@ -13,3 +13,4 @@ seaborn
 pandas
 tqdm
 joblib
+lightgbm

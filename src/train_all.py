@@ -13,6 +13,7 @@ Usage:
 
 import os
 import sys
+import random
 
 # Ensure project root is in Python path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -38,8 +39,25 @@ from src.data_loader import load_dataset
 from src.model import build_hybrid_model
 from src.train import focal_loss
 
+def set_global_seed(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    tf.keras.utils.set_random_seed(seed)
+    try:
+        tf.config.experimental.enable_op_determinism()
+    except Exception:
+        pass
+
+def build_stratify_labels(y_encoded, sources, min_count=2):
+    combo = np.array([f"{y}__{src}" for y, src in zip(y_encoded, sources)], dtype=object)
+    _, counts = np.unique(combo, return_counts=True)
+    if np.all(counts >= min_count):
+        return combo, "class+source"
+    return y_encoded, "class"
+
 def main(args):
     os.makedirs(args.output_dir, exist_ok=True)
+    set_global_seed(args.seed)
     
     # Check GPU/CUDA availability
     gpus = tf.config.list_physical_devices('GPU')
@@ -72,6 +90,9 @@ def main(args):
         all_paths.append(img_paths)
         all_source.append(np.full(len(y_label), name))
         print(f"    -> {len(y_label)} images loaded")
+
+    if not all_label:
+        raise ValueError("No datasets were loaded. Please verify DATASETS paths in src/config.py.")
     
     X_img_all   = np.concatenate(all_img, axis=0)
     X_feat_all  = np.concatenate(all_feat, axis=0)
@@ -98,19 +119,28 @@ def main(args):
     train_pct = args.split[0] / 100
     val_pct   = args.split[1] / 100
     test_pct  = args.split[2] / 100
+    if train_pct <= 0:
+        raise ValueError(f"Train split must be > 0, got {args.split[0]}")
+    if (val_pct + test_pct) <= 0:
+        raise ValueError("Validation + test split must be > 0")
     
+    stratify_all, stratify_mode_first = build_stratify_labels(y_encoded, source_all)
+
     # First split: train vs (val+test)
     X_img_train, X_img_temp, X_feat_train, X_feat_temp, y_train, y_temp, paths_train, paths_temp, src_train, src_temp = \
         train_test_split(X_img_all, X_feat_all, y_encoded, paths_all, source_all,
-                         test_size=(val_pct + test_pct), stratify=y_encoded, random_state=42)
-    
+                         test_size=(val_pct + test_pct), stratify=stratify_all, random_state=args.seed)
+
     # Second split: val vs test
     relative_test = test_pct / (val_pct + test_pct)
+    stratify_temp, stratify_mode_second = build_stratify_labels(y_temp, src_temp)
     X_img_val, X_img_test, X_feat_val, X_feat_test, y_val, y_test, paths_val, paths_test, src_val, src_test = \
         train_test_split(X_img_temp, X_feat_temp, y_temp, paths_temp, src_temp,
-                         test_size=relative_test, stratify=y_temp, random_state=42)
+                         test_size=relative_test, stratify=stratify_temp, random_state=args.seed)
     
     print(f" Split Ratio: {args.split[0]}/{args.split[1]}/{args.split[2]}")
+    print(f" Stratification (split 1): {stratify_mode_first}")
+    print(f" Stratification (split 2): {stratify_mode_second}")
     print(f" Train: {len(y_train)} | Val: {len(y_val)} | Test: {len(y_test)}")
     print(f" Train classes: {dict(zip(*np.unique(y_train, return_counts=True)))}")
     print(f" Val   classes: {dict(zip(*np.unique(y_val, return_counts=True)))}")
@@ -172,7 +202,7 @@ def main(args):
     # 5. CLASS WEIGHTING & TARGET ENCODING
     # =============================================
     print("Applying SMOTE...")
-    smote = SMOTE(random_state=42)
+    smote = SMOTE(random_state=args.seed)
     X_feat_train_bal, y_train_bal = smote.fit_resample(X_feat_train_scaled, y_train)
 
     # Map balanced features to real images
@@ -192,7 +222,7 @@ def main(args):
     # 6. UMAP
     # =============================================
     print("Running UMAP Projection...")
-    umap_reducer = umap.UMAP(n_neighbors=10, min_dist=0.05, n_components=2, metric='euclidean', random_state=42)
+    umap_reducer = umap.UMAP(n_neighbors=10, min_dist=0.05, n_components=2, metric='euclidean', random_state=args.seed)
     X_train_umap = umap_reducer.fit_transform(X_feat_train_bal)
     X_val_umap   = umap_reducer.transform(X_feat_val_scaled)
     X_test_umap  = umap_reducer.transform(X_feat_test_scaled)
@@ -253,27 +283,38 @@ def main(args):
     import scipy.stats
     import lightgbm as lgb
     from sklearn.metrics import accuracy_score
+
+    X_img_agent_train, X_img_agent_val, X_feat_agent_train, X_feat_agent_val, X_umap_agent_train, X_umap_agent_val, y_agent_train, y_agent_val = train_test_split(
+        X_img_train_bal, X_feat_train_bal, X_train_umap, y_train_bal,
+        test_size=0.2, stratify=y_train_bal, random_state=args.seed
+    )
     
     # Extract Deep Features (using the layer right before the final Dense)
     # model.layers[-2] is the Dropout layer outputting the 128 deep features
     deep_feature_model = tf.keras.models.Model(inputs=model.inputs, outputs=model.layers[-2].output)
     
     print("Extracting Deep Features, Probabilities, and Entropy...")
-    X_deep_train = deep_feature_model.predict([X_img_train_bal, X_feat_train_bal, X_train_umap], verbose=0)
-    y_prob_train = model.predict([X_img_train_bal, X_feat_train_bal, X_train_umap], verbose=0)
+    X_deep_train = deep_feature_model.predict([X_img_agent_train, X_feat_agent_train, X_umap_agent_train], verbose=0)
+    y_prob_train = model.predict([X_img_agent_train, X_feat_agent_train, X_umap_agent_train], verbose=0)
     X_entropy_train = scipy.stats.entropy(y_prob_train, axis=1).reshape(-1, 1)
+
+    X_deep_val = deep_feature_model.predict([X_img_agent_val, X_feat_agent_val, X_umap_agent_val], verbose=0)
+    y_prob_val = model.predict([X_img_agent_val, X_feat_agent_val, X_umap_agent_val], verbose=0)
+    X_entropy_val = scipy.stats.entropy(y_prob_val, axis=1).reshape(-1, 1)
     
     X_deep_test = deep_feature_model.predict([X_img_test, X_feat_test_scaled, X_test_umap], verbose=0)
     y_prob_test = model.predict([X_img_test, X_feat_test_scaled, X_test_umap], verbose=0)
     X_entropy_test = scipy.stats.entropy(y_prob_test, axis=1).reshape(-1, 1)
     
     X_agent_train = np.hstack([X_deep_train, y_prob_train, X_entropy_train])
+    X_agent_val = np.hstack([X_deep_val, y_prob_val, X_entropy_val])
     X_agent_test = np.hstack([X_deep_test, y_prob_test, X_entropy_test])
     
     print(f"Agent Input Shape: {X_agent_train.shape}")
     
     lgb_params = {
         'objective': 'multiclass',
+        'num_class': num_classes,
         'metric': 'multi_logloss',
         'verbosity': -1,
         'boosting_type': 'gbdt',
@@ -289,16 +330,17 @@ def main(args):
         'bagging_freq': 2,
         'class_weight': 'balanced',
         'n_jobs': -1,
-        'random_state': 42
+        'random_state': args.seed
     }
     
     print("Training LightGBM Super Agent...")
     super_agent = lgb.LGBMClassifier(**lgb_params)
+    y_val_ints = y_agent_val
     y_test_ints = np.argmax(y_test_cat, axis=1)
     
     super_agent.fit(
-        X_agent_train, y_train_bal,
-        eval_set=[(X_agent_test, y_test_ints)],
+        X_agent_train, y_agent_train,
+        eval_set=[(X_agent_val, y_val_ints)],
         callbacks=[lgb.early_stopping(50, verbose=False)]
     )
     
@@ -348,6 +390,7 @@ if __name__ == '__main__':
                         help="Train/Val/Test split percentages (default: 70 15 15)")
     parser.add_argument('--batch_size', type=int, default=16, help="Batch size")
     parser.add_argument('--epochs', type=int, default=90, help="Number of epochs")
+    parser.add_argument('--seed', type=int, default=42, help="Random seed for reproducible splits/training")
     
     args = parser.parse_args()
     

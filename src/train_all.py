@@ -45,10 +45,16 @@ def set_global_seed(seed):
     tf.keras.utils.set_random_seed(seed)
     try:
         tf.config.experimental.enable_op_determinism()
-    except Exception:
-        pass
+    except (RuntimeError, AttributeError, ValueError) as err:
+        print(f"⚠️ Could not enable deterministic TensorFlow ops: {err}")
 
 def build_stratify_labels(y_encoded, sources, min_count=2):
+    """
+    Build split labels that preserve both class and dataset source when possible.
+
+    Falls back to class-only stratification when any class+source bucket has fewer
+    than `min_count` samples, which would otherwise break stratified splitting.
+    """
     combo = np.array([f"{y}__{src}" for y, src in zip(y_encoded, sources)], dtype=object)
     _, counts = np.unique(combo, return_counts=True)
     if np.all(counts >= min_count):
@@ -334,12 +340,11 @@ def main(args):
     
     print("Training LightGBM Super Agent...")
     super_agent = lgb.LGBMClassifier(**lgb_params)
-    y_agent_val_labels = y_agent_val
     y_test_ints = np.argmax(y_test_cat, axis=1)
     
     super_agent.fit(
         X_agent_train, y_agent_train,
-        eval_set=[(X_agent_val, y_agent_val_labels)],
+        eval_set=[(X_agent_val, y_agent_val)],
         callbacks=[lgb.early_stopping(50, verbose=False)]
     )
     

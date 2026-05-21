@@ -150,25 +150,25 @@ def build_hybrid_model(image_input_shape, feat_input_shape, umap_feat_shape, num
     image_input_se2 = Input(shape=image_input_shape, name='image_input_se2')
     cnn_branch = create_SE2CNN_model(image_input_shape, num_classes, dropout_rate)
     x_se2 = cnn_branch(image_input_se2)
-    x_se2 = Dense(64, activation='relu', kernel_regularizer=l2(0.01))(x_se2)
+    x_se2 = Dense(64, activation='relu', kernel_regularizer=l2(1e-4))(x_se2)
     x_se2 = BatchNormalization()(x_se2)
     x_se2 = Dropout(dropout_rate)(x_se2)
 
     # Handcrafted Feature Branch
     feat_input = Input(shape=feat_input_shape, name='feat_input')
-    x_feat = Dense(64, activation='relu', kernel_regularizer=l2(0.01))(feat_input)
+    x_feat = Dense(64, activation='relu', kernel_regularizer=l2(1e-4))(feat_input)
     x_feat = BatchNormalization()(x_feat)
     x_feat = Dropout(dropout_rate)(x_feat)
 
     # UMAP Feature Branch
     umap_input = Input(shape=umap_feat_shape, name='umap_feat_input')
-    x_umap = Dense(32, activation='relu', kernel_regularizer=l2(0.01))(umap_input)
+    x_umap = Dense(32, activation='relu', kernel_regularizer=l2(1e-4))(umap_input)
     x_umap = BatchNormalization()(x_umap)
     x_umap = Dropout(dropout_rate)(x_umap)
 
     # Fusion
     combined = Concatenate()([x_se2, x_feat, x_umap])
-    x = Dense(128, activation='relu', kernel_regularizer=l2(0.01))(combined)
+    x = Dense(128, activation='relu', kernel_regularizer=l2(1e-4))(combined)
     x = Dropout(dropout_rate)(x)
     output = Dense(num_classes, activation='softmax')(x)
 

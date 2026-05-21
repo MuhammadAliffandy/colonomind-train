@@ -213,14 +213,14 @@ def main(args):
     )
     
     model.compile(
-        optimizer=Adam(1e-5),
-        loss=focal_loss(gamma=2.5, alpha=0.25),
+        optimizer=Adam(1e-3),
+        loss=focal_loss(gamma=2.0, alpha=1.0),
         metrics=['accuracy']
     )
     
     callbacks = [
-        EarlyStopping(monitor='val_accuracy', patience=20, restore_best_weights=True, verbose=1, mode='max'),
-        ReduceLROnPlateau(monitor='val_accuracy', factor=0.5, patience=10, verbose=1, mode='max')
+        EarlyStopping(monitor='val_accuracy', patience=30, restore_best_weights=True, verbose=1, mode='max'),
+        ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5, verbose=1, mode='min')
     ]
     
     print("Starting Training...")

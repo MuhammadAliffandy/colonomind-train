@@ -314,7 +314,6 @@ def main(args):
     
     lgb_params = {
         'objective': 'multiclass',
-        'num_class': num_classes,
         'metric': 'multi_logloss',
         'verbosity': -1,
         'boosting_type': 'gbdt',
@@ -335,12 +334,12 @@ def main(args):
     
     print("Training LightGBM Super Agent...")
     super_agent = lgb.LGBMClassifier(**lgb_params)
-    y_val_ints = y_agent_val
+    y_agent_val_labels = y_agent_val
     y_test_ints = np.argmax(y_test_cat, axis=1)
     
     super_agent.fit(
         X_agent_train, y_agent_train,
-        eval_set=[(X_agent_val, y_val_ints)],
+        eval_set=[(X_agent_val, y_agent_val_labels)],
         callbacks=[lgb.early_stopping(50, verbose=False)]
     )
     

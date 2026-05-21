@@ -171,8 +171,20 @@ def main(args):
     # =============================================
     # 5. CLASS WEIGHTING & TARGET ENCODING
     # =============================================
-    print("Preparing targets (Removed SMOTE to prevent image duplication)...")
-    y_train_cat = to_categorical(y_train, num_classes=num_classes)
+    print("Applying SMOTE...")
+    smote = SMOTE(random_state=42)
+    X_feat_train_bal, y_train_bal = smote.fit_resample(X_feat_train_scaled, y_train)
+
+    # Map balanced features to real images
+    print("Mapping balanced features back to images...")
+    X_img_train_bal = []
+    for feat, label in zip(X_feat_train_bal, y_train_bal):
+        dists = np.linalg.norm(X_feat_train_scaled[y_train == label] - feat, axis=1)
+        idx = np.where(y_train == label)[0][np.argmin(dists)]
+        X_img_train_bal.append(X_img_train[idx])
+    X_img_train_bal = np.array(X_img_train_bal, dtype=np.float32)
+
+    y_train_cat_bal = to_categorical(y_train_bal, num_classes=num_classes)
     y_val_cat   = to_categorical(y_val, num_classes=num_classes)
     y_test_cat  = to_categorical(y_test, num_classes=num_classes)
     
@@ -181,39 +193,39 @@ def main(args):
     # =============================================
     print("Running UMAP Projection...")
     umap_reducer = umap.UMAP(n_neighbors=10, min_dist=0.05, n_components=2, metric='euclidean', random_state=42)
-    X_train_umap = umap_reducer.fit_transform(X_feat_train_scaled)
+    X_train_umap = umap_reducer.fit_transform(X_feat_train_bal)
     X_val_umap   = umap_reducer.transform(X_feat_val_scaled)
     X_test_umap  = umap_reducer.transform(X_feat_test_scaled)
     
     # =============================================
     # 7. BUILD & TRAIN MODEL
     # =============================================
-    class_weights = compute_class_weight(class_weight='balanced', classes=np.unique(y_train), y=y_train)
+    class_weights = compute_class_weight(class_weight='balanced', classes=np.unique(y_train_bal), y=y_train_bal)
     class_weight_dict = {i: w for i, w in enumerate(class_weights)}
     
     print("Building Hybrid Model...")
     model = build_hybrid_model(
         image_input_shape=(IMG_SIZE[0], IMG_SIZE[1], 3),
-        feat_input_shape=(X_feat_train_scaled.shape[1],),
+        feat_input_shape=(X_feat_train_bal.shape[1],),
         umap_feat_shape=(2,),
         num_classes=num_classes,
-        dropout_rate=0.3
+        dropout_rate=0.4
     )
     
     model.compile(
-        optimizer=Adam(1e-3),
-        loss='categorical_crossentropy',
+        optimizer=Adam(1e-5),
+        loss=focal_loss(gamma=2.5, alpha=0.25),
         metrics=['accuracy']
     )
     
     callbacks = [
         EarlyStopping(monitor='val_accuracy', patience=20, restore_best_weights=True, verbose=1, mode='max'),
-        ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5, verbose=1, mode='min')
+        ReduceLROnPlateau(monitor='val_accuracy', factor=0.5, patience=10, verbose=1, mode='max')
     ]
     
     print("Starting Training...")
     history = model.fit(
-        [X_img_train, X_feat_train_scaled, X_train_umap], y_train_cat,
+        [X_img_train_bal, X_feat_train_bal, X_train_umap], y_train_cat_bal,
         validation_data=([X_img_val, X_feat_val_scaled, X_val_umap], y_val_cat),
         batch_size=args.batch_size,
         epochs=args.epochs,

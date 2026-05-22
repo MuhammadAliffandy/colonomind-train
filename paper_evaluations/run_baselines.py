@@ -3,7 +3,7 @@ import sys
 import argparse
 import numpy as np
 import tensorflow as tf
-from tensorflow.keras.applications import ResNet50, DenseNet121, EfficientNetB0
+from tensorflow.keras.applications import ResNet50, DenseNet121, EfficientNetB0, ConvNeXtTiny
 from sklearn.model_selection import train_test_split
 from tensorflow.keras.utils import to_categorical
 from tensorflow.keras.callbacks import EarlyStopping
@@ -23,6 +23,14 @@ def get_baseline_model(model_name, input_shape, num_classes):
         base_model = DenseNet121(weights='imagenet', include_top=False, input_shape=input_shape)
     elif model_name == 'efficientnet':
         base_model = EfficientNetB0(weights='imagenet', include_top=False, input_shape=input_shape)
+    elif model_name == 'convnext':
+        base_model = ConvNeXtTiny(weights='imagenet', include_top=False, input_shape=input_shape)
+    elif model_name == 'vit':
+        try:
+            from vit_keras import vit
+            base_model = vit.vit_b16(image_size=input_shape[0], activation='softmax', pretrained=True, include_top=False, pretrained_top=False, classes=num_classes)
+        except ImportError:
+            raise ImportError("Please run `pip install vit-keras` to use the ViT baseline model.")
     else:
         raise ValueError(f"Model {model_name} not supported natively in this skeleton.")
         
@@ -37,7 +45,7 @@ def get_baseline_model(model_name, input_shape, num_classes):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model', type=str, choices=['resnet', 'densenet', 'efficientnet'], default='resnet')
+    parser.add_argument('--model', type=str, choices=['resnet', 'densenet', 'efficientnet', 'convnext', 'vit'], default='resnet')
     parser.add_argument('--epochs', type=int, default=15)
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--gpu', type=str, default=None)

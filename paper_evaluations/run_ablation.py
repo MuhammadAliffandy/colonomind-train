@@ -64,6 +64,7 @@ def get_ablation_model(scenario, input_shape, feat_shape, num_classes):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--scenario', type=int, choices=[1,2,3,4,5,6], default=6, help="Ablation Scenario 1-6")
+    parser.add_argument('--domain', type=str, choices=['intra', 'cross', 'multi'], default='intra')
     parser.add_argument('--epochs', type=int, default=15)
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--gpu', type=str, default=None)
@@ -82,30 +83,62 @@ if __name__ == "__main__":
     from src.config import IMG_SIZE, DATASETS
     from sklearn.model_selection import train_test_split
     
-    all_img, all_feat, all_label = [], [], []
+    # Load all individually
+    data_dict = {}
     for name, path in DATASETS.items():
         if os.path.exists(path):
-            Xi, Xf, yl, _ = load_dataset(path)
-            all_img.append(Xi); all_feat.append(Xf); all_label.append(yl)
+            data_dict[name] = load_dataset(path)
 
-    X_img_all  = np.concatenate(all_img, axis=0)
-    X_feat_all = np.concatenate(all_feat, axis=0)
-    y_all      = np.concatenate(all_label, axis=0)
-    
+    # Domain Splitting Logic
+    if args.domain == 'intra':
+        all_i, all_f, all_l = [], [], []
+        for Xi, Xf, yl, _ in data_dict.values():
+            all_i.append(Xi); all_f.append(Xf); all_l.append(yl)
+        X_train_full = np.concatenate(all_i, axis=0)
+        F_train_full = np.concatenate(all_f, axis=0)
+        y_train_full = np.concatenate(all_l, axis=0)
+        X_test_full, F_test_full, y_test_full = None, None, None
+    elif args.domain == 'cross':
+        # Train on dataset_1, Test on dataset_2
+        X_train_full, F_train_full, y_train_full, _ = data_dict.get('dataset_1', ([],[],[],[]))
+        X_test_full, F_test_full, y_test_full, _ = data_dict.get('dataset_2', ([],[],[],[]))
+    elif args.domain == 'multi':
+        # Train on dataset_1, dataset_2, mixed. Test on public
+        tr_i, tr_f, tr_l = [], [], []
+        for k in ['dataset_1', 'dataset_2', 'mixed']:
+            if k in data_dict:
+                tr_i.append(data_dict[k][0]); tr_f.append(data_dict[k][1]); tr_l.append(data_dict[k][2])
+        X_train_full = np.concatenate(tr_i, axis=0)
+        F_train_full = np.concatenate(tr_f, axis=0)
+        y_train_full = np.concatenate(tr_l, axis=0)
+        X_test_full, F_test_full, y_test_full, _ = data_dict.get('public', ([],[],[],[]))
+
+    # Fit Label Encoder on EVERYTHING to ensure classes match
+    all_possible_y = np.concatenate([v[2] for v in data_dict.values()], axis=0)
     le_path = './results/finetuned/label_encoder.pkl'
     if os.path.exists(le_path):
         le = joblib.load(le_path)
-        y_encoded = le.transform(y_all)
     else:
         le = LabelEncoder()
-        y_encoded = le.fit_transform(y_all)
+        le.fit(all_possible_y)
 
-    X_img_train, X_img_tmp, X_feat_train, X_feat_tmp, y_train, y_tmp = train_test_split(
-        X_img_all, X_feat_all, y_encoded, test_size=0.30, stratify=y_encoded, random_state=args.seed
-    )
-    X_img_val, X_img_test, X_feat_val, X_feat_test, y_val, y_test = train_test_split(
-        X_img_tmp, X_feat_tmp, y_tmp, test_size=0.50, stratify=y_tmp, random_state=args.seed
-    )
+    y_tr_enc = le.transform(y_train_full)
+    if X_test_full is not None:
+        y_te_enc = le.transform(y_test_full)
+
+    if args.domain == 'intra':
+        X_img_train, X_img_tmp, X_feat_train, X_feat_tmp, y_train, y_tmp = train_test_split(
+            X_train_full, F_train_full, y_tr_enc, test_size=0.30, stratify=y_tr_enc, random_state=args.seed
+        )
+        X_img_val, X_img_test, X_feat_val, X_feat_test, y_val, y_test = train_test_split(
+            X_img_tmp, X_feat_tmp, y_tmp, test_size=0.50, stratify=y_tmp, random_state=args.seed
+        )
+    else:
+        # For cross/multi, we split train_full into train/val (80/20), and use test_full directly
+        X_img_train, X_img_val, X_feat_train, X_feat_val, y_train, y_val = train_test_split(
+            X_train_full, F_train_full, y_tr_enc, test_size=0.20, stratify=y_tr_enc, random_state=args.seed
+        )
+        X_img_test, X_feat_test, y_test = X_test_full, F_test_full, y_te_enc
 
     num_classes = len(le.classes_)
     y_train_cat = to_categorical(y_train, num_classes)

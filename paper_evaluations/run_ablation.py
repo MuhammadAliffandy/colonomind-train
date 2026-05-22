@@ -5,7 +5,7 @@ import tensorflow as tf
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.callbacks import EarlyStopping
 import sys
-sys.path.append('..')
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.data_loader import load_dataset
 from src.model import build_hybrid_model, create_SE2CNN_model
 from src.train import focal_loss

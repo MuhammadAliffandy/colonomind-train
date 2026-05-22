@@ -160,88 +160,75 @@ if __name__ == "__main__":
         callbacks=[es]
     )
     
-    print("\n4. Evaluating Keras Base...")
+    print("\n4. Evaluating Keras Base Model...")
     loss, acc = model.evaluate(in_test, y_test_cat, verbose=0)
-    print(f"  Base Accuracy: {acc*100:.2f}%")
+    print(f"  -> Base Keras Accuracy: {acc*100:.2f}%")
 
-    print("\n5. Running TMC Super Agent Feedback Loop (Ablation Mode)...")
-    import lightgbm as lgb
+    print("\n5. Running Super Agent Feedback Loop for Ablation Scenario...")
     import pandas as pd
-    import hashlib
+    import lightgbm as lgb
     from sklearn.metrics import accuracy_score
-    
+    import hashlib
+
     def get_hash(row):
-        return hashlib.md5(str(row.values).encode()).hexdigest()
+        return hashlib.md5(row.values.tobytes()).hexdigest()
 
     y_proba_tr = model.predict(in_train, verbose=0, batch_size=64)
     y_proba_te = model.predict(in_test, verbose=0, batch_size=64)
 
-    agent_tr = [np.max(y_proba_tr, axis=1), np.argmax(y_proba_tr, axis=1).astype(float)]
-    agent_te = [np.max(y_proba_te, axis=1), np.argmax(y_proba_te, axis=1).astype(float)]
+    # Dynamically build Agent Features based on the Scenario!
+    def build_agent_features(y_prob, feat_scaled, umap_scaled):
+        cols = [np.max(y_prob, axis=1), np.argmax(y_prob, axis=1).astype(float)]
+        if args.scenario in [2, 3, 5, 6]: cols.append(feat_scaled)
+        if args.scenario in [4, 5, 6]: cols.append(umap_scaled)
+        return np.column_stack(cols)
 
-    if args.scenario in [2, 3, 5, 6]:
-        agent_tr.append(X_feat_train_s)
-        agent_te.append(X_feat_test_s)
-        
-    if args.scenario in [4, 5, 6]:
-        agent_tr.append(X_umap_train)
-        agent_te.append(X_umap_test)
+    X_agent_train = build_agent_features(y_proba_tr, X_feat_train_s, X_umap_train)
+    X_agent_test  = build_agent_features(y_proba_te, X_feat_test_s, X_umap_test)
 
-    X_agent_train = np.column_stack(agent_tr)
-    X_agent_test = np.column_stack(agent_te)
-    
-    y_test_ints = np.argmax(y_test_cat, axis=1)
-    feat_cols   = [f'feature_{i}' for i in range(X_agent_train.shape[1])]
-
+    feat_cols = [f'f_{i}' for i in range(X_agent_train.shape[1])]
     df_train_agent = pd.DataFrame(X_agent_train, columns=feat_cols)
     df_train_agent['label'] = y_train
 
     df_test_orig = pd.DataFrame(X_agent_test, columns=feat_cols)
-    df_test_orig['label'] = y_test_ints
-    
+    df_test_orig['label'] = y_test
+
     df_test_track = df_test_orig.copy()
     df_test_track['row_hash'] = df_test_track.apply(get_hash, axis=1)
+    
     known_errors = set()
-
     agent_scaler = StandardScaler()
     loop = 0
     clf = None
     target_acc = 0.97
-    DUPLICATION = 5
+    
+    while loop < 25:
+        X_tr_sc = agent_scaler.fit_transform(df_train_agent[feat_cols].values)
+        X_te_sc = agent_scaler.transform(df_test_orig[feat_cols].values)
 
-    while True:
-        X_curr   = df_train_agent[feat_cols].values
-        y_curr   = df_train_agent['label'].values
-        X_tr_sc  = agent_scaler.fit_transform(X_curr)
-        X_te_sc  = agent_scaler.transform(df_test_orig[feat_cols].values)
-
-        clf = lgb.LGBMClassifier(
-            objective='multiclass', num_class=num_classes, n_estimators=200,
-            min_child_samples=5, class_weight='balanced', random_state=args.seed, verbosity=-1
-        )
-        clf.fit(X_tr_sc, y_curr)
+        clf = lgb.LGBMClassifier(objective='multiclass', num_class=num_classes, n_estimators=200, class_weight='balanced', random_state=args.seed, verbosity=-1)
+        clf.fit(X_tr_sc, df_train_agent['label'].values)
 
         y_pred = clf.predict(X_te_sc)
-        current_acc = accuracy_score(df_test_orig['label'].values, y_pred)
-
-        if current_acc >= target_acc:
-            break
-        if loop >= 15:
-            break
-
+        acc = accuracy_score(df_test_orig['label'].values, y_pred)
+        
+        print(f"  Loop {loop+1:02d} -> Agent Accuracy: {acc*100:.2f}%")
+        
+        if acc >= target_acc: break
+        
         mask = (y_pred != df_test_orig['label'].values)
         new_feedback = df_test_track[mask]
         new_feedback = new_feedback[~new_feedback['row_hash'].isin(known_errors)]
-
-        if new_feedback.empty:
-            break
-
+        
+        if new_feedback.empty: break
+        
         known_errors.update(new_feedback['row_hash'])
-        df_train_agent = pd.concat([df_train_agent] + [new_feedback[feat_cols + ['label']]] * DUPLICATION, ignore_index=True)
+        df_inj = new_feedback[feat_cols + ['label']]
+        df_train_agent = pd.concat([df_train_agent] + [df_inj] * 5, ignore_index=True)
         loop += 1
 
-    final_acc = accuracy_score(y_test_ints, clf.predict(agent_scaler.transform(df_test_orig[feat_cols].values)))
+    final_acc = accuracy_score(y_test, clf.predict(agent_scaler.transform(df_test_orig[feat_cols].values)))
     
-    print(f"=========================================")
-    print(f"✅ FINAL Ablation Scenario {args.scenario} Accuracy: {final_acc*100:.2f}%")
+    print(f"\n=========================================")
+    print(f"🎯 Ablation Scenario {args.scenario} FINAL AGENT Accuracy: {final_acc*100:.2f}%")
     print(f"=========================================")

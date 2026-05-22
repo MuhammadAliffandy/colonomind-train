@@ -245,15 +245,19 @@ def main(args):
                           patience=5, verbose=1, mode='min')
     ]
 
-    ft_history = model.fit(
-        [X_img_bal, X_feat_bal, X_umap_train], y_train_cat,
-        validation_data=([X_img_val, X_feat_val_s, X_umap_val], y_val_cat),
-        batch_size=args.batch_size,
-        epochs=args.epochs,
-        class_weight=cw_dict,
-        callbacks=ft_callbacks,
-        verbose=1
-    )
+    ft_history = None
+    if args.epochs > 0:
+        ft_history = model.fit(
+            [X_img_bal, X_feat_bal, X_umap_train], y_train_cat,
+            validation_data=([X_img_val, X_feat_val_s, X_umap_val], y_val_cat),
+            batch_size=args.batch_size,
+            epochs=args.epochs,
+            class_weight=cw_dict,
+            callbacks=ft_callbacks,
+            verbose=1
+        )
+    else:
+        print("  Skipping Keras fine-tuning (--epochs 0). Using existing weights …")
 
     ft_loss, ft_acc = model.evaluate(
         [X_img_test, X_feat_test_s, X_umap_test], y_test_cat, verbose=0)
@@ -381,14 +385,16 @@ def main(args):
     plt.figure(figsize=(14, 4))
 
     plt.subplot(1, 3, 1)
-    plt.plot(ft_history.history['accuracy'],     label='Train')
-    plt.plot(ft_history.history['val_accuracy'], label='Val')
+    if ft_history is not None and 'accuracy' in ft_history.history:
+        plt.plot(ft_history.history['accuracy'],     label='Train')
+        plt.plot(ft_history.history['val_accuracy'], label='Val')
     plt.title('Fine-Tune Accuracy')
     plt.xlabel('Epoch'); plt.legend()
 
     plt.subplot(1, 3, 2)
-    plt.plot(ft_history.history['loss'],     label='Train')
-    plt.plot(ft_history.history['val_loss'], label='Val')
+    if ft_history is not None and 'loss' in ft_history.history:
+        plt.plot(ft_history.history['loss'],     label='Train')
+        plt.plot(ft_history.history['val_loss'], label='Val')
     plt.title('Fine-Tune Loss')
     plt.xlabel('Epoch'); plt.legend()
 

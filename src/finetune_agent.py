@@ -69,6 +69,11 @@ def get_hash(row):
 # MAIN
 # ─────────────────────────────────────────────
 def main(args):
+    # Set target GPU before initializing TensorFlow
+    if args.gpu is not None:
+        os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu)
+        print(f"🔒 Restricting execution to GPU: {args.gpu}")
+        
     os.makedirs(args.output_dir, exist_ok=True)
     set_global_seed(args.seed)
 
@@ -103,8 +108,14 @@ def main(args):
     print("  Loading artefacts …")
     scaler       = joblib.load(scaler_path)
     le           = joblib.load(le_path)
-    umap_reducer = joblib.load(umap_path)
     num_classes  = len(le.classes_)
+
+    rebuild_umap = False
+    try:
+        umap_reducer = joblib.load(umap_path)
+    except Exception as e:
+        print(f"  ⚠️  Failed to load UMAP model ({e}). Will re-fit dynamically to bypass Numba mismatch.")
+        rebuild_umap = True
 
     print("  Building model architecture and loading weights (bypassing Keras 3 from_config issues) …")
     from src.model import build_hybrid_model
@@ -195,8 +206,15 @@ def main(args):
     y_val_cat   = to_categorical(y_val,       num_classes)
     y_test_cat  = to_categorical(y_test,      num_classes)
 
-    # ── UMAP (use existing reducer) ────────────────
-    print("  Projecting via saved UMAP …")
+    # ── UMAP (use existing reducer or re-fit if failed) ────────────────
+    if rebuild_umap:
+        print("  Re-fitting UMAP dynamically to ensure exact feature projection …")
+        import umap
+        umap_reducer = umap.UMAP(n_neighbors=10, min_dist=0.05, n_components=2, metric='euclidean', random_state=args.seed)
+        umap_reducer.fit(X_feat_bal)
+    else:
+        print("  Projecting via saved UMAP …")
+        
     X_umap_train = umap_reducer.transform(X_feat_bal)
     X_umap_val   = umap_reducer.transform(X_feat_val_s)
     X_umap_test  = umap_reducer.transform(X_feat_test_s)
@@ -402,6 +420,8 @@ if __name__ == '__main__':
                         help="Folder to save fine-tuned artefacts")
     parser.add_argument('--split',  type=int, nargs=3, default=[70, 15, 15],
                         help="Same Train/Val/Test split used in train_all (default: 70 15 15)")
+    parser.add_argument('--gpu',          type=str,   default=None,
+                        help="Specify GPU device ID (e.g., '1' or '0')")
     parser.add_argument('--epochs',       type=int,   default=30,
                         help="Fine-tuning epochs (default: 30)")
     parser.add_argument('--batch_size',   type=int,   default=16)

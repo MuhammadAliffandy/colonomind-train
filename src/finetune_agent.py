@@ -101,9 +101,23 @@ def main(args):
                                     f"   Run train_all.py first to create it.")
 
     print("  Loading Keras model …")
+    
+    # Keras 2 to Keras 3 compatibility: Strip out legacy 'renorm' args from BatchNormalization
+    from tensorflow.keras.layers import BatchNormalization
+    class CompatibleBatchNormalization(BatchNormalization):
+        def __init__(self, **kwargs):
+            kwargs.pop('renorm', None)
+            kwargs.pop('renorm_clipping', None)
+            kwargs.pop('renorm_momentum', None)
+            super().__init__(**kwargs)
+
     model = tf.keras.models.load_model(
         model_path,
-        custom_objects={'focal_loss': focal_loss, 'loss': focal_loss()}
+        custom_objects={
+            'focal_loss': focal_loss, 
+            'loss': focal_loss(),
+            'BatchNormalization': CompatibleBatchNormalization
+        }
     )
     scaler       = joblib.load(scaler_path)
     le           = joblib.load(le_path)

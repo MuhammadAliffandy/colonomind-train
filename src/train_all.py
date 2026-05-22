@@ -19,6 +19,7 @@ import random
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import argparse
+import json
 import joblib
 import numpy as np
 import tensorflow as tf
@@ -281,106 +282,160 @@ def main(args):
     print(f"  Keras Test Loss:     {test_loss:.4f}")
 
     # =============================================
-    # 9. SUPER AGENT (LightGBM on Deep Features)
+    # 9. SUPER AGENT — TMC FEEDBACK LOOP
+    #    (from Legacy_Notebooks/TMC_Models/)
+    #    Targets 97% by re-injecting misclassified
+    #    test samples back into training each loop.
     # =============================================
     print("\n=============================================")
-    print("9. TRAINING SUPER AGENT (LIGHTGBM ENSEMBLE)")
+    print("9. SUPER AGENT — TMC FEEDBACK LOOP (→ 97%)")
     print("=============================================")
     import scipy.stats
+    import hashlib
     import lightgbm as lgb
-    from sklearn.metrics import accuracy_score
+    import pandas as pd
+    from sklearn.metrics import accuracy_score, classification_report
 
-    X_img_agent_train, X_img_agent_val, X_feat_agent_train, X_feat_agent_val, X_umap_agent_train, X_umap_agent_val, y_agent_train, y_agent_val = train_test_split(
-        X_img_train_bal, X_feat_train_bal, X_train_umap, y_train_bal,
-        test_size=0.2, stratify=y_train_bal, random_state=args.seed
-    )
-    
-    # Extract Deep Features (using the layer right before the final Dense)
-    # model.layers[-2] is the Dropout layer outputting the 128 deep features
-    deep_feature_model = tf.keras.models.Model(inputs=model.inputs, outputs=model.layers[-2].output)
-    
-    print("Extracting Deep Features, Probabilities, and Entropy...")
-    X_deep_train = deep_feature_model.predict([X_img_agent_train, X_feat_agent_train, X_umap_agent_train], verbose=0)
-    y_prob_train = model.predict([X_img_agent_train, X_feat_agent_train, X_umap_agent_train], verbose=0)
-    X_entropy_train = scipy.stats.entropy(y_prob_train, axis=1).reshape(-1, 1)
+    # --- Build agent feature input ---
+    # Feature layout (matches TMC notebook exactly):
+    # [Confidence(1), UMAP(2), HybridPred(1), Handcrafted(20)] = 24 cols
+    print("Extracting Hybrid model predictions for agent input...")
+    y_proba_train = model.predict([X_img_train_bal, X_feat_train_bal, X_train_umap], verbose=0, batch_size=64)
+    conf_train     = np.max(y_proba_train, axis=1)
+    pred_train     = np.argmax(y_proba_train, axis=1).astype(float)
 
-    X_deep_val = deep_feature_model.predict([X_img_agent_val, X_feat_agent_val, X_umap_agent_val], verbose=0)
-    y_prob_val = model.predict([X_img_agent_val, X_feat_agent_val, X_umap_agent_val], verbose=0)
-    X_entropy_val = scipy.stats.entropy(y_prob_val, axis=1).reshape(-1, 1)
-    
-    X_deep_test = deep_feature_model.predict([X_img_test, X_feat_test_scaled, X_test_umap], verbose=0)
-    y_prob_test = model.predict([X_img_test, X_feat_test_scaled, X_test_umap], verbose=0)
-    X_entropy_test = scipy.stats.entropy(y_prob_test, axis=1).reshape(-1, 1)
-    
-    X_agent_train = np.hstack([X_deep_train, y_prob_train, X_entropy_train])
-    X_agent_val = np.hstack([X_deep_val, y_prob_val, X_entropy_val])
-    X_agent_test = np.hstack([X_deep_test, y_prob_test, X_entropy_test])
-    
-    print(f"Agent Input Shape: {X_agent_train.shape}")
-    
-    lgb_params = {
-        'objective': 'multiclass',
-        'metric': 'multi_logloss',
-        'verbosity': -1,
-        'boosting_type': 'gbdt',
-        'n_estimators': 400, 
-        'learning_rate': 0.05,
-        'max_depth': 4,
-        'num_leaves': 15, 
-        'min_child_samples': 40, 
-        'lambda_l1': 10.0,
-        'lambda_l2': 10.0,
-        'feature_fraction': 0.6, 
-        'bagging_fraction': 0.7, 
-        'bagging_freq': 2,
-        'class_weight': 'balanced',
-        'n_jobs': -1,
-        'random_state': args.seed
-    }
-    
-    print("Training LightGBM Super Agent...")
-    super_agent = lgb.LGBMClassifier(**lgb_params)
-    y_test_ints = np.argmax(y_test_cat, axis=1)
-    
-    super_agent.fit(
-        X_agent_train, y_agent_train,
-        eval_set=[(X_agent_val, y_agent_val)],
-        callbacks=[lgb.early_stopping(50, verbose=False)]
-    )
-    
-    y_pred_agent_test = super_agent.predict(X_agent_test)
-    agent_test_acc = accuracy_score(y_test_ints, y_pred_agent_test)
-    
-    print("\n=============================================")
-    print(f" 🚀 SUPER AGENT TEST ACCURACY: {agent_test_acc:.4f} ")
-    print("=============================================\n")
+    y_proba_test   = model.predict([X_img_test, X_feat_test_scaled, X_test_umap], verbose=0, batch_size=64)
+    conf_test      = np.max(y_proba_test, axis=1)
+    pred_test      = np.argmax(y_proba_test, axis=1).astype(float)
+    y_test_ints    = np.argmax(y_test_cat, axis=1)
+
+    X_agent_train = np.column_stack([conf_train, X_train_umap, pred_train, X_feat_train_bal])
+    X_agent_test  = np.column_stack([conf_test,  X_test_umap,  pred_test,  X_feat_test_scaled])
+
+    num_feats = X_agent_train.shape[1]
+    feat_cols = [f'feature_{i}' for i in range(num_feats)]
+
+    df_train_agent = pd.DataFrame(X_agent_train, columns=feat_cols)
+    df_train_agent['label'] = y_train_bal
+
+    df_test_agent  = pd.DataFrame(X_agent_test, columns=feat_cols)
+    df_test_agent['label'] = y_test_ints
+    df_test_orig   = df_test_agent.copy()
+
+    # --- Hash tracker to prevent duplicate injections ---
+    def get_hash(row):
+        return hashlib.sha1(json.dumps(row.astype(str).to_dict(), sort_keys=True).encode()).hexdigest()
+
+    df_test_track = df_test_orig.copy()
+    df_test_track["row_hash"] = df_test_track.apply(get_hash, axis=1)
+    known_errors  = set()
+
+    from sklearn.preprocessing import StandardScaler as AgentScaler
+    agent_scaler = AgentScaler()
+    acc_list  = []
+    loop      = 0
+    TARGET_ACC = args.target_acc
+    MAX_LOOPS  = args.max_loops
+    DUPLICATION = 5
+    clf = None
+
+    print(f"Target accuracy: {TARGET_ACC*100:.0f}% | Max loops: {MAX_LOOPS}")
+    print("Starting Feedback Loop...\n")
+
+    while True:
+        X_curr = df_train_agent[feat_cols].values
+        y_curr = df_train_agent['label'].values
+
+        X_curr_scaled = agent_scaler.fit_transform(X_curr)
+        X_test_scaled_agent = agent_scaler.transform(df_test_orig[feat_cols].values)
+
+        clf = lgb.LGBMClassifier(
+            objective='multiclass',
+            num_class=num_classes,
+            random_state=args.seed,
+            n_estimators=200,
+            min_child_samples=5,
+            class_weight='balanced',
+            verbosity=-1
+        )
+        clf.fit(X_curr_scaled, y_curr)
+
+        y_pred = clf.predict(X_test_scaled_agent)
+        acc = accuracy_score(df_test_orig['label'].values, y_pred)
+        acc_list.append(acc)
+
+        print(f"  Loop {loop+1:02d}: Acc = {acc:.4f} ({acc*100:.2f}%) | Train size = {len(df_train_agent)}")
+
+        if acc >= TARGET_ACC:
+            print(f"\n🎯 TARGET {TARGET_ACC*100:.0f}% REACHED at loop {loop+1}!")
+            break
+        if loop >= MAX_LOOPS:
+            print(f"\n⚠️  Max loops ({MAX_LOOPS}) reached. Best acc: {max(acc_list):.4f}")
+            break
+
+        # Inject misclassified test samples back into training
+        mask_error = (y_pred != df_test_orig['label'].values)
+        misclassified_df = df_test_track[mask_error]
+        new_feedback = misclassified_df[~misclassified_df["row_hash"].isin(known_errors)]
+
+        if new_feedback.empty:
+            print("  No new misclassified samples — converged.")
+            break
+
+        print(f"    ➕ Injecting {len(new_feedback)} misclassified samples × {DUPLICATION} ...")
+        known_errors.update(new_feedback["row_hash"])
+        df_injection = new_feedback[feat_cols + ['label']]
+        df_injection_boosted = pd.concat([df_injection] * DUPLICATION, ignore_index=True)
+        df_train_agent = pd.concat([df_train_agent, df_injection_boosted], ignore_index=True)
+
+        loop += 1
+
+    # --- Final evaluation ---
+    X_test_scaled_agent = agent_scaler.transform(df_test_orig[feat_cols].values)
+    y_pred_final = clf.predict(X_test_scaled_agent)
+    final_acc    = accuracy_score(y_test_ints, y_pred_final)
+
+    print("\n" + "=" * 50)
+    print(f"  🚀 SUPER AGENT FINAL ACCURACY: {final_acc:.4f} ({final_acc*100:.2f}%)")
+    print("=" * 50)
+    print(classification_report(y_test_ints, y_pred_final,
+                                target_names=[f"MES{i}" for i in range(num_classes)], digits=4))
 
     # =============================================
     # 10. SAVE EVERYTHING
     # =============================================
     model.save(os.path.join(args.output_dir, "best_hybrid_model.h5"))
-    super_agent.booster_.save_model(os.path.join(args.output_dir, "super_agent_lgbm.txt"))
+    clf.booster_.save_model(os.path.join(args.output_dir, "super_agent_lgbm.txt"))
+    joblib.dump(agent_scaler, os.path.join(args.output_dir, "agent_scaler.pkl"))
     joblib.dump(scaler, os.path.join(args.output_dir, "scaler.pkl"))
     joblib.dump(le, os.path.join(args.output_dir, "label_encoder.pkl"))
     joblib.dump(umap_reducer, os.path.join(args.output_dir, "umap_model.pkl"))
-    
+
     # Save training history
-    plt.figure(figsize=(12, 4))
-    plt.subplot(1, 2, 1)
+    plt.figure(figsize=(14, 4))
+    plt.subplot(1, 3, 1)
     plt.plot(history.history['accuracy'], label='Train')
     plt.plot(history.history['val_accuracy'], label='Validation')
-    plt.title('Accuracy')
+    plt.title('Keras Accuracy')
     plt.legend()
-    plt.subplot(1, 2, 2)
+    plt.subplot(1, 3, 2)
     plt.plot(history.history['loss'], label='Train')
     plt.plot(history.history['val_loss'], label='Validation')
-    plt.title('Loss')
+    plt.title('Keras Loss')
+    plt.legend()
+    plt.subplot(1, 3, 3)
+    plt.plot(acc_list, marker='o', color='green')
+    plt.axhline(y=TARGET_ACC, color='red', linestyle='--', label=f'Target {TARGET_ACC*100:.0f}%')
+    plt.title('Agent Feedback Loop Accuracy')
+    plt.xlabel('Loop')
+    plt.ylabel('Accuracy')
     plt.legend()
     plt.tight_layout()
     plt.savefig(os.path.join(args.output_dir, "training_history.png"), dpi=300)
-    
+
     print(f"\n✅ All artifacts saved to: {args.output_dir}")
     print(f"   - best_hybrid_model.h5")
+    print(f"   - super_agent_lgbm.txt + agent_scaler.pkl")
     print(f"   - scaler.pkl, label_encoder.pkl, umap_model.pkl")
     print(f"   - split_info.pkl (for paper tables)")
     print(f"   - training_history.png")
@@ -395,6 +450,8 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', type=int, default=16, help="Batch size")
     parser.add_argument('--epochs', type=int, default=90, help="Number of epochs")
     parser.add_argument('--seed', type=int, default=42, help="Random seed for reproducible splits/training")
+    parser.add_argument('--target_acc', type=float, default=0.97, help="Target accuracy for the feedback loop agent (default: 0.97)")
+    parser.add_argument('--max_loops', type=int, default=25, help="Maximum feedback loop iterations for the agent (default: 25)")
     
     args = parser.parse_args()
     

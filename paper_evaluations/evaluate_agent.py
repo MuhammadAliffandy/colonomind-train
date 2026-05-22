@@ -12,6 +12,16 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import seaborn as sns
 
+# eClinicalMedicine Style Guidelines (Arial font, clean aesthetics)
+plt.rcParams['font.family'] = 'Arial'
+plt.rcParams['font.size'] = 12
+plt.rcParams['axes.labelsize'] = 14
+plt.rcParams['axes.titlesize'] = 16
+plt.rcParams['figure.titlesize'] = 18
+plt.rcParams['axes.linewidth'] = 1.5
+plt.rcParams['xtick.major.width'] = 1.5
+plt.rcParams['ytick.major.width'] = 1.5
+
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import confusion_matrix, classification_report, accuracy_score
 from sklearn.utils import resample
@@ -127,22 +137,31 @@ def main():
     
     cm = confusion_matrix(y_test, y_pred_final)
     
-    # Save Confusion Matrix
+    # Save Confusion Matrix (eClinicalMedicine Style)
     plt.figure(figsize=(8,6))
-    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=le.classes_, yticklabels=le.classes_)
-    plt.title(f'TMC Feedback Agent Confusion Matrix\nAccuracy: {acc*100:.2f}%')
-    plt.ylabel('True Label')
-    plt.xlabel('Predicted Label')
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=le.classes_, yticklabels=le.classes_,
+                cbar_kws={'label': 'Number of Samples'}, linewidths=0.5, linecolor='white')
+    plt.title(f'TMC Feedback Agent Confusion Matrix\nAccuracy: {acc*100:.2f}%', pad=15)
+    plt.ylabel('True Label', weight='bold')
+    plt.xlabel('Predicted Label', weight='bold')
     plt.tight_layout()
-    plt.savefig(os.path.join(args.output_dir, 'confusion_matrix.png'), dpi=300)
+    plt.savefig(os.path.join(args.output_dir, 'confusion_matrix_eClinicalMed.png'), dpi=600, bbox_inches='tight', transparent=False, facecolor='white')
 
-    # Save Agent Feature Importance
+    # Save Agent Feature Importance (eClinicalMedicine Style)
     plt.figure(figsize=(10,6))
-    lgb.plot_importance(super_agent, max_num_features=15, title='Top 15 Agent Decision Features')
+    ax = lgb.plot_importance(super_agent, max_num_features=15, title='Top 15 Agent Decision Features', 
+                             xlabel='Feature Importance (Split)', ylabel='Features', grid=False)
+    plt.title('Top 15 Agent Decision Features', pad=15, weight='bold')
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
     plt.tight_layout()
-    plt.savefig(os.path.join(args.output_dir, 'agent_feature_importance.png'), dpi=300)
+    plt.savefig(os.path.join(args.output_dir, 'agent_feature_importance_eClinicalMed.png'), dpi=600, bbox_inches='tight', transparent=False, facecolor='white')
 
-    # Sensitivity / Specificity
+    # Sensitivity / Specificity / eClinicalMedicine Table Export
+    from sklearn.metrics import precision_recall_fscore_support
+    precisions, recalls, f1s, supports = precision_recall_fscore_support(y_test, y_pred_final)
+    
+    table_data = []
     metrics_str = ""
     for i in range(num_classes):
         tp = cm[i, i]
@@ -152,7 +171,25 @@ def main():
         
         sens = tp / (tp + fn) if (tp + fn) > 0 else 0
         spec = tn / (tn + fp) if (tn + fp) > 0 else 0
+        
+        table_data.append({
+            'Class': le.classes_[i],
+            'Sensitivity (Recall)': f"{sens:.4f}",
+            'Specificity': f"{spec:.4f}",
+            'Precision': f"{precisions[i]:.4f}",
+            'F1-Score': f"{f1s[i]:.4f}",
+            'Support (N)': int(supports[i])
+        })
         metrics_str += f"Class {le.classes_[i]}: Sensitivity = {sens:.4f}, Specificity = {spec:.4f}\n"
+        
+    df_results = pd.DataFrame(table_data)
+    
+    # Save professional tables for manuscript
+    df_results.to_csv(os.path.join(args.output_dir, 'eClinicalMedicine_Table.csv'), index=False)
+    try:
+        df_results.to_excel(os.path.join(args.output_dir, 'eClinicalMedicine_Table.xlsx'), index=False)
+    except ImportError:
+        print("  (openpyxl not installed, skipping .xlsx export)")
 
     # Save Report
     report = f"""=========================================

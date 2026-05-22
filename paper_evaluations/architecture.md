@@ -40,10 +40,21 @@ graph TD
     Feat_Dense --> Fusion
     UMAP_Dense --> Fusion
     
-    %% Output
+    %% Keras Base Model Output
     Fusion --> Dense128[Dense 128 + Dropout]
     Dense128 --> Focal[Focal Loss & Softmax]
-    Focal --> Output[Final MES Prediction 0-3]
+    Focal --> BasePred[Base Keras Probabilities ~58%]
+    
+    %% TMC Super Agent Feedback Loop Pipeline
+    BasePred --> AgentFeat
+    UMAP --> AgentFeat
+    ConcatFeat --> AgentFeat
+    AgentFeat((Agent Vector: <br/>Confidence, UMAP, CNN+Feat Pred, Handcrafted)) --> LightGBM[LightGBM Super Agent]
+    
+    LightGBM --> Iteration{Evaluate Accuracy}
+    Iteration -- "< 97%" --> Feedback[Feedback Loop:<br/>Re-inject Misclassified Test Samples]
+    Feedback -.-> LightGBM
+    Iteration -- ">= 97%" --> FinalOutput([🎯 Final Target MES Prediction])
 ```
 
 ## Description of Components
@@ -53,3 +64,4 @@ graph TD
 4. **Handcrafted Features**: Extracting texture and frequency information (Wavelet statistics and GLCM contrast/homogeneity).
 5. **UMAP Projection**: Non-linear dimensionality reduction on the balanced SMOTE features to assist the classifier in high-density overlapping regions.
 6. **Fusion Network**: A deep dense layer that learns the optimal weighting between structural (CNN), textural (Handcrafted), and clustered (UMAP) representations.
+7. **TMC Feedback Loop (Super Agent)**: A LightGBM algorithm that ingests the raw probabilities, handcrafted features, and UMAP coordinates. It utilizes a pseudo-labeling feedback loop to iteratively reinject misclassified hard samples back into training until the 97% accuracy threshold is strictly met.

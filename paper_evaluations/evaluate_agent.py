@@ -177,6 +177,32 @@ def main():
     plt.tight_layout()
     plt.savefig(os.path.join(args.output_dir, 'agent_feature_importance_eClinicalMed.png'), dpi=600, bbox_inches='tight', transparent=False, facecolor='white')
 
+    # Major 7: Handcrafted Feature Importance Analysis
+    from sklearn.ensemble import RandomForestClassifier
+    print("  Calculating Handcrafted Feature Importance (Random Forest)...")
+    rf = RandomForestClassifier(n_estimators=100, random_state=args.seed)
+    rf.fit(X_feat_train, y_train)
+    importances = rf.feature_importances_
+    features = [
+        'LL_mean', 'LL_std', 'LL_var', 'LL_entropy',
+        'LH_mean', 'LH_std', 'LH_var', 'LH_entropy',
+        'HL_mean', 'HL_std', 'HL_var', 'HL_entropy',
+        'HH_mean', 'HH_std', 'HH_var', 'HH_entropy',
+        'HH_energy', 'GLCM_contrast', 'GLCM_dissimilarity', 'GLCM_homogeneity'
+    ]
+    indices = np.argsort(importances)[::-1]
+    
+    plt.figure(figsize=(12, 6))
+    plt.bar(range(len(features)), importances[indices], align="center", color='#2B5B84')
+    plt.xticks(range(len(features)), [features[i] for i in indices], rotation=45, ha='right')
+    plt.title("Random Forest Feature Importance (Handcrafted Modalities)", pad=15, weight='bold')
+    plt.ylabel("Gini Importance", weight='bold')
+    ax = plt.gca()
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    plt.tight_layout()
+    plt.savefig(os.path.join(args.output_dir, 'handcrafted_feature_importance_eClinicalMed.png'), dpi=600, bbox_inches='tight', facecolor='white')
+
     # Sensitivity / Specificity / eClinicalMedicine Table Export
     from sklearn.metrics import precision_recall_fscore_support
     precisions, recalls, f1s, supports = precision_recall_fscore_support(y_test, y_pred_final)

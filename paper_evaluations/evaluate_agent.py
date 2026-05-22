@@ -71,7 +71,14 @@ def main():
 
     scaler       = joblib.load(scaler_path)
     le           = joblib.load(le_path)
-    umap_reducer = joblib.load(umap_path)
+    num_classes  = len(le.classes_)
+
+    rebuild_umap = False
+    try:
+        umap_reducer = joblib.load(umap_path)
+    except Exception as e:
+        print(f"  ⚠️  Failed to load UMAP model ({e}). Will re-fit dynamically.")
+        rebuild_umap = True
     agent_scaler = joblib.load(agent_sc_path)
     super_agent  = lgb.Booster(model_file=agent_path)
     num_classes  = len(le.classes_)
@@ -101,16 +108,29 @@ def main():
     source_all  = np.concatenate(all_source, axis=0)
 
     # Stratified split to match training exactly
-    X_img_tmp, X_img_test, X_feat_tmp, X_feat_test, y_tmp, y_test = train_test_split(
+    X_img_train, X_img_tmp, X_feat_train, X_feat_tmp, y_train, y_tmp = train_test_split(
         X_img_all, X_feat_all, y_encoded, test_size=0.30, stratify=y_encoded, random_state=args.seed
     )
     
     X_img_val, X_img_test, X_feat_val, X_feat_test, y_val, y_test = train_test_split(
-        X_img_test, X_feat_test, y_test, test_size=0.50, stratify=y_test, random_state=args.seed
+        X_img_tmp, X_feat_tmp, y_tmp, test_size=0.50, stratify=y_tmp, random_state=args.seed
     )
 
     X_img_test = X_img_test.astype(np.float32) / 255.0
     X_feat_test_s = scaler.transform(X_feat_test)
+
+    if rebuild_umap:
+        print("  Re-fitting UMAP dynamically to ensure exact feature projection …")
+        from imblearn.over_sampling import SMOTE
+        import umap
+        
+        X_feat_train_s = scaler.transform(X_feat_train)
+        smote = SMOTE(random_state=args.seed)
+        X_feat_bal, _ = smote.fit_resample(X_feat_train_s, y_train)
+        
+        umap_reducer = umap.UMAP(n_neighbors=10, min_dist=0.05, n_components=2, metric='euclidean', random_state=args.seed)
+        umap_reducer.fit(X_feat_bal)
+        
     X_umap_test = umap_reducer.transform(X_feat_test_s)
     
     # 3. Agent Predictions

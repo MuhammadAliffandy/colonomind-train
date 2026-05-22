@@ -1,0 +1,181 @@
+import os
+import sys
+import time
+import json
+import joblib
+import numpy as np
+import pandas as pd
+import tensorflow as tf
+import lightgbm as lgb
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import confusion_matrix, classification_report, accuracy_score
+from sklearn.utils import resample
+
+# Add src to path so we can import modules
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from src.config import IMG_SIZE, DATASETS
+from src.data_loader import load_dataset
+from src.model import build_hybrid_model
+
+def compute_95_ci(y_true, y_pred, n_bootstraps=1000):
+    accuracies = []
+    for _ in range(n_bootstraps):
+        idx = resample(np.arange(len(y_true)))
+        acc = accuracy_score(y_true[idx], y_pred[idx])
+        accuracies.append(acc)
+    lower = np.percentile(accuracies, 2.5)
+    upper = np.percentile(accuracies, 97.5)
+    return np.mean(accuracies), lower, upper
+
+def main():
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--results_dir', type=str, default='./results/finetuned', help="Path to finetuned artefacts")
+    parser.add_argument('--output_dir', type=str, default='./paper_results', help="Path to save paper evaluations")
+    parser.add_argument('--seed', type=int, default=42)
+    parser.add_argument('--gpu', type=str, default=None)
+    args = parser.parse_args()
+
+    if args.gpu is not None:
+        os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu)
+
+    os.makedirs(args.output_dir, exist_ok=True)
+
+    print("=========================================")
+    print(" PAPER EVALUATIONS: SUPER AGENT PIPELINE")
+    print("=========================================")
+    
+    # 1. Load Artefacts
+    print("\n1. Loading Artefacts...")
+    model_path   = os.path.join(args.results_dir, "finetuned_hybrid_model.h5")
+    scaler_path  = os.path.join(args.results_dir, "scaler.pkl")
+    le_path      = os.path.join(args.results_dir, "label_encoder.pkl")
+    umap_path    = os.path.join(args.results_dir, "umap_model.pkl")
+    agent_sc_path= os.path.join(args.results_dir, "agent_scaler.pkl")
+    agent_path   = os.path.join(args.results_dir, "super_agent_lgbm.txt")
+
+    scaler       = joblib.load(scaler_path)
+    le           = joblib.load(le_path)
+    umap_reducer = joblib.load(umap_path)
+    agent_scaler = joblib.load(agent_sc_path)
+    super_agent  = lgb.Booster(model_file=agent_path)
+    num_classes  = len(le.classes_)
+
+    print("   Building Keras Architecture...")
+    model = build_hybrid_model(
+        image_input_shape=(IMG_SIZE[0], IMG_SIZE[1], 3),
+        feat_input_shape=(scaler.n_features_in_,),
+        umap_feat_shape=(2,),
+        num_classes=num_classes,
+        dropout_rate=0.4
+    )
+    model.load_weights(model_path)
+
+    # 2. Load Data and get Test Set
+    print("\n2. Loading Test Set...")
+    all_img, all_feat, all_label, all_source = [], [], [], []
+    for name, path in DATASETS.items():
+        if os.path.exists(path):
+            Xi, Xf, yl, _ = load_dataset(path)
+            all_img.append(Xi); all_feat.append(Xf)
+            all_label.append(yl); all_source.append(np.full(len(yl), name))
+
+    X_img_all   = np.concatenate(all_img, axis=0)
+    X_feat_all  = np.concatenate(all_feat, axis=0)
+    y_encoded   = le.transform(np.concatenate(all_label, axis=0))
+    source_all  = np.concatenate(all_source, axis=0)
+
+    # Stratified split to match training exactly
+    X_img_tmp, X_img_test, X_feat_tmp, X_feat_test, y_tmp, y_test = train_test_split(
+        X_img_all, X_feat_all, y_encoded, test_size=0.30, stratify=y_encoded, random_state=args.seed
+    )
+    
+    X_img_val, X_img_test, X_feat_val, X_feat_test, y_val, y_test = train_test_split(
+        X_img_test, X_feat_test, y_test, test_size=0.50, stratify=y_test, random_state=args.seed
+    )
+
+    X_img_test = X_img_test.astype(np.float32) / 255.0
+    X_feat_test_s = scaler.transform(X_feat_test)
+    X_umap_test = umap_reducer.transform(X_feat_test_s)
+    
+    # 3. Agent Predictions
+    print("\n3. Generating Predictions...")
+    start_time = time.time()
+    y_proba_te = model.predict([X_img_test, X_feat_test_s, X_umap_test], verbose=0)
+    
+    X_agent_test = np.column_stack([
+        np.max(y_proba_te, axis=1),
+        X_umap_test,
+        np.argmax(y_proba_te, axis=1).astype(float),
+        X_feat_test_s
+    ])
+    
+    X_test_scaled_agent = agent_scaler.transform(X_agent_test)
+    y_pred_proba = super_agent.predict(X_test_scaled_agent)
+    y_pred_final = np.argmax(y_pred_proba, axis=1)
+    latency = (time.time() - start_time) / len(X_img_test) * 1000
+
+    # 4. Compute Metrics
+    print("\n4. Computing Paper Metrics...")
+    acc = accuracy_score(y_test, y_pred_final)
+    mean_acc, lower_ci, upper_ci = compute_95_ci(y_test, y_pred_final)
+    
+    cm = confusion_matrix(y_test, y_pred_final)
+    
+    # Save Confusion Matrix
+    plt.figure(figsize=(8,6))
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=le.classes_, yticklabels=le.classes_)
+    plt.title(f'TMC Feedback Agent Confusion Matrix\nAccuracy: {acc*100:.2f}%')
+    plt.ylabel('True Label')
+    plt.xlabel('Predicted Label')
+    plt.tight_layout()
+    plt.savefig(os.path.join(args.output_dir, 'confusion_matrix.png'), dpi=300)
+
+    # Save Agent Feature Importance
+    plt.figure(figsize=(10,6))
+    lgb.plot_importance(super_agent, max_num_features=15, title='Top 15 Agent Decision Features')
+    plt.tight_layout()
+    plt.savefig(os.path.join(args.output_dir, 'agent_feature_importance.png'), dpi=300)
+
+    # Sensitivity / Specificity
+    metrics_str = ""
+    for i in range(num_classes):
+        tp = cm[i, i]
+        fn = np.sum(cm[i, :]) - tp
+        fp = np.sum(cm[:, i]) - tp
+        tn = np.sum(cm) - tp - fp - fn
+        
+        sens = tp / (tp + fn) if (tp + fn) > 0 else 0
+        spec = tn / (tn + fp) if (tn + fp) > 0 else 0
+        metrics_str += f"Class {le.classes_[i]}: Sensitivity = {sens:.4f}, Specificity = {spec:.4f}\n"
+
+    # Save Report
+    report = f"""=========================================
+PAPER EVALUATION REPORT
+=========================================
+Final Agent Accuracy : {acc:.4f} (95% CI: {lower_ci:.4f} - {upper_ci:.4f})
+Inference Latency    : {latency:.2f} ms per sample
+
+--- Sensitivity & Specificity ---
+{metrics_str}
+--- Classification Report ---
+{classification_report(y_test, y_pred_final, target_names=le.classes_, digits=4)}
+
+=========================================
+Model Size Details:
+- Keras Model: {os.path.getsize(model_path) / (1024*1024):.2f} MB
+- Agent Model: {os.path.getsize(agent_path) / 1024:.2f} KB
+"""
+    with open(os.path.join(args.output_dir, 'evaluation_report.txt'), 'w') as f:
+        f.write(report)
+        
+    print(report)
+    print(f"\n✅ All paper figures and reports saved to: {args.output_dir}")
+
+if __name__ == '__main__':
+    main()

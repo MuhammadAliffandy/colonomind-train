@@ -100,29 +100,24 @@ def main(args):
             raise FileNotFoundError(f"❌ Missing artefact: {p}\n"
                                     f"   Run train_all.py first to create it.")
 
-    print("  Loading Keras model …")
-    
-    # Keras 2 to Keras 3 compatibility: Strip out legacy 'renorm' args from BatchNormalization
-    from tensorflow.keras.layers import BatchNormalization
-    class CompatibleBatchNormalization(BatchNormalization):
-        def __init__(self, **kwargs):
-            kwargs.pop('renorm', None)
-            kwargs.pop('renorm_clipping', None)
-            kwargs.pop('renorm_momentum', None)
-            super().__init__(**kwargs)
-
-    model = tf.keras.models.load_model(
-        model_path,
-        custom_objects={
-            'focal_loss': focal_loss, 
-            'loss': focal_loss(),
-            'BatchNormalization': CompatibleBatchNormalization
-        }
-    )
+    print("  Loading artefacts …")
     scaler       = joblib.load(scaler_path)
     le           = joblib.load(le_path)
     umap_reducer = joblib.load(umap_path)
     num_classes  = len(le.classes_)
+
+    print("  Building model architecture and loading weights (bypassing Keras 3 from_config issues) …")
+    from src.model import build_hybrid_model
+    model = build_hybrid_model(
+        image_input_shape=(IMG_SIZE[0], IMG_SIZE[1], 3),
+        feat_input_shape=(scaler.n_features_in_,),
+        umap_feat_shape=(2,),
+        num_classes=num_classes,
+        dropout_rate=0.4
+    )
+    # Load weights completely bypasses from_config errors for Dense, BatchNormalization, etc.
+    model.load_weights(model_path)
+    
     print(f"  ✅ Loaded — {num_classes} classes: {list(le.classes_)}")
 
     # ══════════════════════════════════════════════

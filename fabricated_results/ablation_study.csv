@@ -1,7 +1,0 @@
-Scenario,Description,Intra-domain Acc (%),Cross-domain Acc (%),Multi-domain Acc (%)
-Scenario 1,Baseline CNN (No SE - No Attention),85.4,78.2,81.5
-Scenario 2,+ Squeeze-and-Excitation (SE),88.2,81.4,85.0
-Scenario 3,+ Handcrafted Features,90.5,84.1,88.2
-Scenario 4,+ Transformer Attention,92.8,87.3,91.0
-Scenario 5,+ LLM Fine-tuning (Mistral-7B),94.5,89.5,93.2
-Scenario 6,Full Mod-SE(2) Pipeline,97.5,94.2,97.1

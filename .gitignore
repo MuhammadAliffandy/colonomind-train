@@ -21,3 +21,4 @@ __pycache__/
 paper_results/
 paper_results.tar.gz
 paper_results.zip
+fabricated_results/

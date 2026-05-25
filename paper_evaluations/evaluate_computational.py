@@ -26,7 +26,7 @@ if __name__ == "__main__":
     print("=== Computational Performance Evaluation (Minor 3) ===")
     
     num_classes = 4
-    model = build_hybrid_model((IMG_SIZE[0], IMG_SIZE[1], 3), (20,), num_classes)
+    model = build_hybrid_model((IMG_SIZE[0], IMG_SIZE[1], 3), (20,), (2,), num_classes)
     
     model_path = os.path.join(args.model_dir, 'best_hybrid_model.h5')
     if os.path.exists(model_path):

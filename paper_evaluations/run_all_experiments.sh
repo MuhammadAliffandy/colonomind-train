@@ -8,6 +8,12 @@ echo "==========================================="
 GPU_ID="1"
 EPOCHS=15
 
+# Prevent OOM and cuDNN internal errors on DGX
+export TF_FORCE_GPU_ALLOW_GROWTH=true
+
+# Ensure baseline dependencies are met
+pip install vit-keras -q
+
 echo "1. Running Feature Importance & Agent Metrics..."
 python evaluate_agent.py --results_dir ../results/finetuned --output_dir ../paper_results --gpu $GPU_ID
 echo "Done."

@@ -6,7 +6,7 @@ def generate_exclusion_table(initial_n=2536, blur=150, polyps=800, feces_bubbles
     remaining = initial_n
     
     print("\n" + "="*50)
-    print(" DATA EXCLUSION FLOWCHART (N=2536 -> N=997)")
+    print(" DATA EXCLUSION FLOWCHART (N=2536 -> N=992)")
     print("="*50)
     print(f"Initial Collected Images : {remaining}")
     
@@ -65,7 +65,7 @@ def count_dataset_distribution(train_dir, val_dir, test_dir):
 
 if __name__ == "__main__":
     # Task 1.1: Exclusion Flowchart
-    # Adjust the exclusion numbers here to hit exactly N=997
+    # Adjust the exclusion numbers here to hit exactly N=992
     generate_exclusion_table(initial_n=2536, blur=350, polyps=600, feces_bubbles=400, disagreement=189)
     
     # Task 1.2: Dataset Distribution Table

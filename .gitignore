@@ -22,3 +22,41 @@ paper_results/
 paper_results.tar.gz
 paper_results.zip
 fabricated_results/
+
+# Large Datasets
+Dataset+Code.zip
+Dataset+Code/
+Dataset_patient_split/
+*.zip
+
+# Virtual Environments
+venv/
+
+# Temporary and Scratch Scripts
+convert_nb.py
+extract_notebook.py
+extracted_tables.json
+fix_patient_level.py
+fix_tables.py
+generate_comparison_notebooks.py
+generate_resnet_notebook.py
+generate_unified_notebook.py
+legacy_source.py
+output_metrics.txt
+patch_super_agent.py
+scratch_extract_tables.py
+study_notebook.py
+test_docx_compare.py
+test_merge.docx
+test_merge.py
+test_merge2.docx
+test_merge2.py
+update_199.py
+update_sample_sizes.py
+verification_results.txt
+verify_metrics.py
+
+# Model Weights
+*.h5
+*.keras
+Result/

@@ -7,7 +7,7 @@ graph TD
     %% Input Layer
     Input[Raw Colonoscopy Image N=2536] --> Exclusion{Quality Exclusion}
     Exclusion -- Blur, Feces, Polyps --> Discard[Discarded N=1539]
-    Exclusion -- Clean Images --> CleanImg[Usable Images N=997]
+    Exclusion -- Clean Images --> CleanImg[Usable Images N=992]
     
     %% Preprocessing
     CleanImg --> Crop[Central Crop 30:430, 200:550]

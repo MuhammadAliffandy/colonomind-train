@@ -60,3 +60,5 @@ verify_metrics.py
 *.h5
 *.keras
 Result/
+revision_inconsistent/
+paper_evaluations/

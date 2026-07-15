@@ -1,3 +1,4 @@
+from joblib import Parallel, delayed
 import os
 import cv2
 import numpy as np
@@ -50,9 +51,20 @@ def extract_glcm_features(image):
 def extract_combined_features(image):
     return extract_wavelet_stats(image) + extract_glcm_features(image)
 
+def process_single_image(img_path, folder_cls):
+    img = cv2.imread(img_path)
+    if img is None: return None
+    img = cv2.resize(img, IMG_SIZE)
+    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    feats = extract_combined_features(img_rgb)
+    label = FOLDER_TO_LABEL.get(folder_cls, folder_cls)
+    return (img_rgb, feats, label, img_path)
+
 def load_all_images(dir_list, dataset_name):
     all_imgs, all_feats, all_labels, all_paths = [], [], [], []
     folder_names = DATASET_CLASS_FOLDERS.get(dataset_name, CLASS_NAMES)
+    
+    tasks = []
     for dataset_dir in dir_list:
         for folder_cls in folder_names:
             cls_dir = os.path.join(dataset_dir, folder_cls)
@@ -63,15 +75,18 @@ def load_all_images(dir_list, dataset_name):
                 if any(k in img_name.lower() for k in IGNORE_KEYWORDS):
                     continue
                 img_path = os.path.join(cls_dir, img_name)
-                img = cv2.imread(img_path)
-                if img is None:
-                    continue
-                img = cv2.resize(img, IMG_SIZE)
-                img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-                all_imgs.append(img_rgb)
-                all_feats.append(extract_combined_features(img_rgb))
-                all_labels.append(FOLDER_TO_LABEL.get(folder_cls, folder_cls))
-                all_paths.append(img_path)
+                tasks.append((img_path, folder_cls))
+                
+    print(f"  Memproses {len(tasks)} gambar secara paralel menggunakan semua core CPU...")
+    results = Parallel(n_jobs=-1, batch_size=10)(delayed(process_single_image)(p, c) for p, c in tasks)
+    
+    for r in results:
+        if r is not None:
+            all_imgs.append(r[0])
+            all_feats.append(r[1])
+            all_labels.append(r[2])
+            all_paths.append(r[3])
+            
     return all_imgs, all_feats, all_labels, all_paths
 
 def load_tmc_ucm(tmc_root, split_filter=None):

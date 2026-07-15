@@ -2,6 +2,11 @@
 
 # Script to Run Intra-Domain ColonoMind Experiments on DGX Server
 
+# You can override BASE_DIR if your datasets are stored elsewhere.
+# Default is '..' because we assume you run this from inside the repository folder,
+# and the 'Dataset' and 'Dataset+Code' folders are parallel to the repo folder.
+BASE_DIR="${BASE_DIR:-..}"
+
 SCENARIOS=(
     "Intra NTUH NTUH"
     "Intra LIMUC LIMUC"
@@ -28,7 +33,7 @@ for entry in "${SCENARIOS[@]}"; do
         echo "🚀 Running Intra Domain: Train=$train Model=$model"
         echo "================================================================="
 
-        python train_dgx.py --scenario "$scenario" --train_dataset "$train" --test_dataset "$test" --model "$model"
+        python train_dgx.py --scenario "$scenario" --train_dataset "$train" --test_dataset "$test" --model "$model" --base_dir "$BASE_DIR"
 
         if [ $? -ne 0 ]; then
             echo "❌ Error occurred during $model on $train (Intra-Domain)"

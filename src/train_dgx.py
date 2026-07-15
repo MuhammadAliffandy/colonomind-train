@@ -27,6 +27,7 @@ def main():
     parser.add_argument("--train_dataset", type=str, required=True, choices=['NTUH', 'LIMUC', 'TMC-UCM'])
     parser.add_argument("--test_dataset", type=str, required=True, choices=['NTUH', 'LIMUC', 'TMC-UCM'])
     parser.add_argument("--model", type=str, required=True, choices=list(MODEL_BUILDERS.keys()))
+    parser.add_argument("--base_dir", type=str, default="..", help="Base directory where Dataset and Dataset+Code folders are located")
     args = parser.parse_args()
 
     print(f"\\n{'='*50}")
@@ -35,9 +36,10 @@ def main():
     print(f"Train Dataset: {args.train_dataset}")
     print(f"Test Dataset: {args.test_dataset}")
     print(f"Model: {args.model}")
+    print(f"Base Dir: {args.base_dir}")
     print(f"{'='*50}\\n")
 
-    BASE_DIR = '..'
+    BASE_DIR = args.base_dir
     DATASET_PATHS = {
         'NTUH': [
             f'{BASE_DIR}/Dataset+Code/MES classification_20250313',

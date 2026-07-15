@@ -50,6 +50,8 @@ def create_ResNet_50_branch(input_shape, dropout_rate=0.5):
     base_model = ResNet50(weights='imagenet', include_top=False, input_tensor=aug)
     # Fully freeze backbone
     for layer in base_model.layers: layer.trainable = False
+    for layer in base_model.layers[-30:]:
+        if not isinstance(layer, BatchNormalization): layer.trainable = True
     x = GlobalAveragePooling2D()(base_model.output)
     x = Dense(512, activation='relu', kernel_regularizer=l2(0.01))(x)
     x = BatchNormalization()(x)
@@ -66,6 +68,8 @@ def create_DenseNet_121_branch(input_shape, dropout_rate=0.5):
     base_model = DenseNet121(weights='imagenet', include_top=False, input_tensor=aug)
     # Fully freeze backbone
     for layer in base_model.layers: layer.trainable = False
+    for layer in base_model.layers[-30:]:
+        if not isinstance(layer, BatchNormalization): layer.trainable = True
     x = GlobalAveragePooling2D()(base_model.output)
     x = Dense(512, activation='relu', kernel_regularizer=l2(0.01))(x)
     x = BatchNormalization()(x)
@@ -82,6 +86,8 @@ def create_EfficientNet_B4_branch(input_shape, dropout_rate=0.5):
     base_model = EfficientNetB4(weights='imagenet', include_top=False, input_tensor=aug)
     # Fully freeze backbone
     for layer in base_model.layers: layer.trainable = False
+    for layer in base_model.layers[-30:]:
+        if not isinstance(layer, BatchNormalization): layer.trainable = True
     x = GlobalAveragePooling2D()(base_model.output)
     x = Dense(512, activation='relu', kernel_regularizer=l2(0.01))(x)
     x = BatchNormalization()(x)
@@ -98,6 +104,8 @@ def create_ConvNeXt_Tiny_branch(input_shape, dropout_rate=0.5):
     base_model = ConvNeXtTiny(weights='imagenet', include_top=False, input_tensor=aug)
     # Fully freeze backbone
     for layer in base_model.layers: layer.trainable = False
+    for layer in base_model.layers[-30:]:
+        if not isinstance(layer, BatchNormalization): layer.trainable = True
     x = GlobalAveragePooling2D()(base_model.output)
     x = Dense(512, activation='relu', kernel_regularizer=l2(0.01))(x)
     x = BatchNormalization()(x)

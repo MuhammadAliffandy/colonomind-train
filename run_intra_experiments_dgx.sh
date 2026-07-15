@@ -3,8 +3,9 @@
 # Script to Run Intra-Domain ColonoMind Experiments on DGX Server
 
 # You can override BASE_DIR if your datasets are stored elsewhere.
-# Default is set to the DGX FUSE mount location.
-BASE_DIR="${BASE_DIR:-/raid/Clara/new_drive}"
+# Default is '..' because we assume the repository folder is placed side-by-side
+# with the 'Dataset' and 'Dataset+Code' folders inside the Clara/new_drive directory.
+BASE_DIR="${BASE_DIR:-..}"
 
 SCENARIOS=(
     "Intra NTUH NTUH"

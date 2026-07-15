@@ -1,6 +1,7 @@
 from joblib import Parallel, delayed
 import os
 import cv2
+cv2.setNumThreads(0) # Prevent OpenCV deadlock in multiprocessing
 import numpy as np
 import pywt
 import scipy.stats
@@ -78,7 +79,7 @@ def load_all_images(dir_list, dataset_name):
                 tasks.append((img_path, folder_cls))
                 
     print(f"  Memproses {len(tasks)} gambar secara paralel menggunakan semua core CPU...")
-    results = Parallel(n_jobs=-1, batch_size=10)(delayed(process_single_image)(p, c) for p, c in tasks)
+    results = Parallel(n_jobs=16, batch_size=32)(delayed(process_single_image)(p, c) for p, c in tasks)
     
     for r in results:
         if r is not None:

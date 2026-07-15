@@ -62,3 +62,6 @@ verify_metrics.py
 Result/
 revision_inconsistent/
 paper_evaluations/
+
+Result/
+final_results/

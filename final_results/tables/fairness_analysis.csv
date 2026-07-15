@@ -1,6 +1,0 @@
-Demographic Group,Sample Size (N),Accuracy (%),Sensitivity (%),Specificity (%),p-value (vs Baseline)
-Overall,992,97.3,97.0,97.5,-
-Gender: Male,582,97.1,96.8,97.4,0.68 (ns)
-Gender: Female,415,97.6,97.3,97.8,0.68 (ns)
-Age: < 50 Years,340,97.9,97.5,98.1,0.42 (ns)
-Age: >= 50 Years,657,97.0,96.7,97.2,0.42 (ns)

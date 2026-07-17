@@ -523,7 +523,7 @@ y_pred_hybrid_train = np.argmax(y_pred_proba_train, axis=1)
 
 # Fit rule-based UMAP DT
 dt = DecisionTreeClassifier(max_depth=5, min_samples_leaf=3, random_state=42)
-dt.fit(X_train_umap, y_train_bal)
+dt.fit(X_train_umap, y_train_encoded)
 y_rule_train = dt.predict(X_train_umap)
 y_rule_test = dt.predict(X_test_umap)
 
@@ -538,7 +538,7 @@ def make_feedback(y_true, y_pred, y_rule, proba, umap_feat, h_feat):
     df["rule_pred"] = y_rule
     return df
 
-df_train_ag = make_feedback(y_train_bal, y_pred_hybrid_train, y_rule_train, y_pred_proba_train, X_train_umap, X_feat_train_bal)
+df_train_ag = make_feedback(y_train_encoded, y_pred_hybrid_train, y_rule_train, y_pred_proba_train, X_train_umap, X_feat_train_scaled)
 df_test_ag  = make_feedback(y_test_encoded, y_pred_hybrid, y_rule_test, y_pred_proba, X_test_umap, X_feat_test_scaled)
 df_test_orig = df_test_ag.copy()
 

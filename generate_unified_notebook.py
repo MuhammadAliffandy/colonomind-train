@@ -515,8 +515,8 @@ plt.show()
 
         cells.append(new_code_cell(f"""# --- 2. SUPER AGENT CONTINUAL LEARNING ({model_name}) ---
 # Generate predictions
-y_pred_proba = model_{model_name.replace('-', '_')}.predict(val_inputs, verbose=0)
-y_pred_hybrid = np.argmax(y_pred_proba, axis=1)
+y_pred_proba_test = model_{model_name.replace('-', '_')}.predict(test_inputs, verbose=0)
+y_pred_hybrid_test = np.argmax(y_pred_proba_test, axis=1)
 
 y_pred_proba_train = model_{model_name.replace('-', '_')}.predict(train_inputs, verbose=0)
 y_pred_hybrid_train = np.argmax(y_pred_proba_train, axis=1)
@@ -539,7 +539,7 @@ def make_feedback(y_true, y_pred, y_rule, proba, umap_feat, h_feat):
     return df
 
 df_train_ag = make_feedback(y_train_encoded, y_pred_hybrid_train, y_rule_train, y_pred_proba_train, X_train_umap, X_feat_train_scaled)
-df_test_ag  = make_feedback(y_test_encoded, y_pred_hybrid, y_rule_test, y_pred_proba, X_test_umap, X_feat_test_scaled)
+df_test_ag  = make_feedback(y_test_encoded, y_pred_hybrid_test, y_rule_test, y_pred_proba_test, X_test_umap, X_feat_test_scaled)
 df_test_orig = df_test_ag.copy()
 
 features = ["confidence", "umap_0", "umap_1"] + [f"f{{i}}" for i in range(20)]
@@ -549,7 +549,15 @@ loop = 0
 known_hashes = set()
 df_train_ag_loop = df_train_ag.copy()
 
-print(f"\\n🤖 Training {model_name} LightGBM Super Agent...")
+base_acc = accuracy_score(y_test_encoded, y_pred_hybrid_test)
+print(f"\\n📊 1. Base Deep Learning Accuracy: {{base_acc:.4f}}")
+
+threshold = 0.70
+low_conf_mask = np.max(y_pred_proba_test, axis=1) < threshold
+print(f"⚙️ 2. Hybrid Selector (Threshold = {{threshold}})")
+print(f"🔍 Delegating {{np.sum(low_conf_mask)}} low-confidence samples to Super Agent...")
+
+print(f"\\n🤖 3. Training {model_name} LightGBM Super Agent Feedback Loop...")
 while loop < 5: # Limit loops to cap accuracy at ~90%
     X_tr = scaler_ag.fit_transform(df_train_ag_loop[features].values)
     y_tr = df_train_ag_loop["label"].values

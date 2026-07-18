@@ -264,12 +264,12 @@ def main(args):
     print(f"\n  Fine-tuned Keras Test Accuracy: {ft_acc:.4f}")
 
     # ══════════════════════════════════════════════
-    # 4. SUPER AGENT — TMC FEEDBACK LOOP
+    # 4. SUPER AGENT — ONE SHOT TRAINING
     #    Builds on the fine-tuned Keras model output
-    #    and climbs toward the target accuracy.
+    #    using confidence-based hybrid routing.
     # ══════════════════════════════════════════════
-    print(f"\n{'='*55}")
-    print(f" SUPER AGENT — FEEDBACK LOOP (target={args.target_acc*100:.0f}%)")
+    print(f"\\n{'='*55}")
+    print(f" SUPER AGENT — HYBRID ROUTING")
     print(f"{'='*55}")
 
     # Build agent feature vectors:
@@ -299,76 +299,44 @@ def main(args):
     df_test_orig = pd.DataFrame(X_agent_test, columns=feat_cols)
     df_test_orig['label'] = y_test_ints
 
-    # Hash tracker to avoid re-injecting same samples
-    df_test_track = df_test_orig.copy()
-    df_test_track['row_hash'] = df_test_track.apply(get_hash, axis=1)
-    known_errors = set()
+    # Train the Agent ONCE, on TRAIN only
+    print(f"\\n  🤖 Training LightGBM Super Agent (One-Shot)...")
+    X_tr_sc  = agent_scaler.fit_transform(df_train_agent[feat_cols].values)
+    y_tr     = df_train_agent['label'].values
+    X_te_sc  = agent_scaler.transform(df_test_orig[feat_cols].values)
 
-    agent_scaler = StandardScaler()
-    acc_list     = []
-    loop         = 0
-    clf          = None
-    DUPLICATION  = 5
-
-    print(f"\n  Target: {args.target_acc*100:.0f}%  |  Max loops: {args.max_loops}\n")
-
-    while True:
-        X_curr   = df_train_agent[feat_cols].values
-        y_curr   = df_train_agent['label'].values
-        X_tr_sc  = agent_scaler.fit_transform(X_curr)
-        X_te_sc  = agent_scaler.transform(df_test_orig[feat_cols].values)
-
-        clf = lgb.LGBMClassifier(
-            objective='multiclass',
-            num_class=num_classes,
-            n_estimators=200,
-            min_child_samples=5,
-            class_weight='balanced',
-            random_state=args.seed,
-            verbosity=-1
-        )
-        clf.fit(X_tr_sc, y_curr)
-
-        y_pred = clf.predict(X_te_sc)
-        acc    = accuracy_score(df_test_orig['label'].values, y_pred)
-        acc_list.append(acc)
-
-        print(f"  Loop {loop+1:02d} → Accuracy: {acc:.4f}  ({acc*100:.2f}%)  |  "
-              f"Train size: {len(df_train_agent)}")
-
-        if acc >= args.target_acc:
-            print(f"\n  🎯 TARGET {args.target_acc*100:.0f}% REACHED at loop {loop+1}!")
-            break
-        if loop >= args.max_loops:
-            print(f"\n  ⚠️  Max loops ({args.max_loops}) reached — best: {max(acc_list):.4f}")
-            break
-
-        # Inject misclassified test samples × DUPLICATION
-        mask          = (y_pred != df_test_orig['label'].values)
-        new_feedback  = df_test_track[mask]
-        new_feedback  = new_feedback[~new_feedback['row_hash'].isin(known_errors)]
-
-        if new_feedback.empty:
-            print("  No new misclassifications — converged.")
-            break
-
-        print(f"    ➕ Injecting {len(new_feedback)} samples × {DUPLICATION}")
-        known_errors.update(new_feedback['row_hash'])
-        df_inj = new_feedback[feat_cols + ['label']]
-        df_train_agent = pd.concat(
-            [df_train_agent] + [df_inj] * DUPLICATION, ignore_index=True)
-
-        loop += 1
+    clf = lgb.LGBMClassifier(
+        objective='multiclass',
+        num_class=num_classes,
+        n_estimators=200,
+        min_child_samples=5,
+        class_weight='balanced',
+        random_state=args.seed,
+        verbosity=-1
+    )
+    clf.fit(X_tr_sc, y_tr)
 
     # ── Final report ───────────────────────────────
-    y_pred_final = clf.predict(agent_scaler.transform(df_test_orig[feat_cols].values))
-    final_acc    = accuracy_score(y_test_ints, y_pred_final)
+    y_pred_deep = np.argmax(y_proba_te, axis=1)
+    base_acc = accuracy_score(y_test_ints, y_pred_deep)
+
+    conf_test = np.max(y_proba_te, axis=1)
+    low_conf_mask = conf_test < args.threshold
+
+    y_pred_agent = clf.predict(X_te_sc)
+    
+    y_pred_hybrid = np.where(low_conf_mask, y_pred_agent, y_pred_deep)
+    hybrid_acc = accuracy_score(y_test_ints, y_pred_hybrid)
 
     print("\n" + "=" * 55)
-    print(f"  🚀 FINAL AGENT ACCURACY: {final_acc:.4f}  ({final_acc*100:.2f}%)")
+    print(f"  📊 BASE DEEP LEARNING ACCURACY: {base_acc:.4f}  ({base_acc*100:.2f}%)")
+    print(f"  ⚙️  HYBRID SELECTOR (Threshold = {args.threshold})")
+    print(f"  🔍 Delegated {low_conf_mask.sum()} / {len(low_conf_mask)} low-confidence cases to Agent")
+    print(f"  🚀 FINAL HYBRID ACCURACY:       {hybrid_acc:.4f}  ({hybrid_acc*100:.2f}%)")
     print("=" * 55)
+    print("\\n✅ Hybrid Classification Report:")
     print(classification_report(
-        y_test_ints, y_pred_final,
+        y_test_ints, y_pred_hybrid,
         target_names=[f"MES{i}" for i in range(num_classes)], digits=4))
 
     # ══════════════════════════════════════════════
@@ -382,33 +350,27 @@ def main(args):
     joblib.dump(umap_reducer, os.path.join(args.output_dir, "umap_model.pkl"))
 
     # ── Training plot ──────────────────────────────
-    plt.figure(figsize=(14, 4))
+    plt.figure(figsize=(10, 4))
 
-    plt.subplot(1, 3, 1)
+    plt.subplot(1, 2, 1)
     if ft_history is not None and 'accuracy' in ft_history.history:
         plt.plot(ft_history.history['accuracy'],     label='Train')
         plt.plot(ft_history.history['val_accuracy'], label='Val')
     plt.title('Fine-Tune Accuracy')
     plt.xlabel('Epoch'); plt.legend()
 
-    plt.subplot(1, 3, 2)
+    plt.subplot(1, 2, 2)
     if ft_history is not None and 'loss' in ft_history.history:
         plt.plot(ft_history.history['loss'],     label='Train')
         plt.plot(ft_history.history['val_loss'], label='Val')
     plt.title('Fine-Tune Loss')
     plt.xlabel('Epoch'); plt.legend()
 
-    plt.subplot(1, 3, 3)
-    plt.plot(acc_list, marker='o', color='green', label='Agent Acc')
-    plt.axhline(y=args.target_acc, color='red', linestyle='--',
-                label=f'Target {args.target_acc*100:.0f}%')
-    plt.title('Feedback Loop Climb')
-    plt.xlabel('Loop'); plt.ylabel('Accuracy'); plt.legend()
-
+    # We can just leave the first two subplots
     plt.tight_layout()
     plt.savefig(os.path.join(args.output_dir, "finetune_history.png"), dpi=300)
 
-    print(f"\n✅ All artefacts saved to: {args.output_dir}")
+    print(f"\\n✅ All artefacts saved to: {args.output_dir}")
     print(f"   - finetuned_hybrid_model.h5")
     print(f"   - super_agent_lgbm.txt  +  agent_scaler.pkl")
     print(f"   - scaler.pkl, label_encoder.pkl, umap_model.pkl")
@@ -436,10 +398,8 @@ if __name__ == '__main__':
     parser.add_argument('--patience',     type=int,   default=10,
                         help="EarlyStopping patience (default: 10)")
     parser.add_argument('--seed',         type=int,   default=42)
-    parser.add_argument('--target_acc',   type=float, default=0.97,
-                        help="Feedback loop target accuracy (default: 0.97)")
-    parser.add_argument('--max_loops',    type=int,   default=25,
-                        help="Max feedback loop iterations (default: 25)")
+    parser.add_argument('--threshold',    type=float, default=0.70,
+                        help="Confidence threshold for hybrid routing (default: 0.70)")
 
     args = parser.parse_args()
     assert sum(args.split) == 100, f"Split must sum to 100, got {sum(args.split)}"

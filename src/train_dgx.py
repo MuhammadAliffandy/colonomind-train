@@ -28,6 +28,7 @@ def main():
     parser.add_argument("--test_dataset", type=str, required=True, choices=['NTUH', 'LIMUC', 'TMC-UCM'])
     parser.add_argument("--model", type=str, required=True, choices=list(MODEL_BUILDERS.keys()))
     parser.add_argument("--base_dir", type=str, default="..", help="Base directory where Dataset and Dataset+Code folders are located")
+    parser.add_argument('--threshold', type=float, default=0.70, help="Confidence threshold for hybrid routing (default: 0.70)")
     args = parser.parse_args()
 
     print(f"\\n{'='*50}")
@@ -194,7 +195,7 @@ def main():
     clf.fit(X_tr, y_tr)
     
     X_te = scaler_ag.transform(df_test_ag[features].values)
-    y_pred_ag = clf.predict(X_te)
+    y_pred_agent = clf.predict(X_te)
     
     # Save Super Agent
     agent_path = os.path.join(BASE_SAVE_DIR, f"{args.model}_agent.txt")
@@ -208,13 +209,28 @@ def main():
     # 3. FINAL EVALUATION ON UNTOUCHED TEST SET
     print(f"\\n[3] Final Evaluation on Test Set")
     y_true = y_test_encoded
-    acc = accuracy_score(y_true, y_pred_ag)
-    prec = precision_score(y_true, y_pred_ag, average='macro', zero_division=0)
-    rec = recall_score(y_true, y_pred_ag, average='macro', zero_division=0)
-    f1 = f1_score(y_true, y_pred_ag, average='macro', zero_division=0)
-    kappa = cohen_kappa_score(y_true, y_pred_ag, weights='quadratic')
     
-    cm = confusion_matrix(y_true, y_pred_ag)
+    y_pred_deep = np.argmax(y_pred_proba_test, axis=1)
+    base_acc = accuracy_score(y_true, y_pred_deep)
+    
+    conf_test = np.max(y_pred_proba_test, axis=1)
+    low_conf_mask = conf_test < args.threshold
+    
+    y_pred_hybrid = np.where(low_conf_mask, y_pred_agent, y_pred_deep)
+    hybrid_acc = accuracy_score(y_true, y_pred_hybrid)
+    
+    print(f"  📊 BASE DEEP LEARNING ACCURACY: {base_acc:.4f}  ({base_acc*100:.2f}%)")
+    print(f"  ⚙️  HYBRID SELECTOR (Threshold = {args.threshold})")
+    print(f"  🔍 Delegated {low_conf_mask.sum()} / {len(low_conf_mask)} low-confidence cases to Agent")
+    print(f"  🚀 FINAL HYBRID ACCURACY:       {hybrid_acc:.4f}  ({hybrid_acc*100:.2f}%)")
+
+    acc = accuracy_score(y_true, y_pred_hybrid)
+    prec = precision_score(y_true, y_pred_hybrid, average='macro', zero_division=0)
+    rec = recall_score(y_true, y_pred_hybrid, average='macro', zero_division=0)
+    f1 = f1_score(y_true, y_pred_hybrid, average='macro', zero_division=0)
+    kappa = cohen_kappa_score(y_true, y_pred_hybrid, weights='quadratic')
+    
+    cm = confusion_matrix(y_true, y_pred_hybrid)
     specs = []
     for i in range(len(le.classes_)):
         tn = np.sum(cm) - np.sum(cm[i,:]) - np.sum(cm[:,i]) + cm[i,i]
@@ -224,7 +240,8 @@ def main():
 
     metrics = {
         'Model': args.model,
-        'Accuracy': float(acc),
+        'Base_Accuracy': float(base_acc),
+        'Hybrid_Accuracy': float(hybrid_acc),
         'Precision': float(prec),
         'Recall': float(rec),
         'Specificity': float(spec),

@@ -543,48 +543,35 @@ df_test_ag  = make_feedback(y_test_encoded, y_pred_hybrid_test, y_rule_test, y_p
 df_test_orig = df_test_ag.copy()
 
 features = ["confidence", "umap_0", "umap_1"] + [f"f{{i}}" for i in range(20)]
+
+# Train the Agent ONCE, on TRAIN only (no test leakage)
+print(f"\\n🤖 Training {model_name} LightGBM Super Agent (One-Shot)...")
 scaler_ag = StandardScaler()
+X_tr = scaler_ag.fit_transform(df_train_ag[features].values)
+y_tr = df_train_ag["label"].values
+clf = lgb.LGBMClassifier(random_state=42, class_weight='balanced')
+clf.fit(X_tr, y_tr)
 
-loop = 0
-known_hashes = set()
-df_train_ag_loop = df_train_ag.copy()
-
+# Base deep-model accuracy on test
 base_acc = accuracy_score(y_test_encoded, y_pred_hybrid_test)
-print(f"\\n📊 1. Base Deep Learning Accuracy: {{base_acc:.4f}}")
+print(f"\\n📊 Base Deep Learning Accuracy (test): {{base_acc:.4f}}")
 
+# Hybrid routing by confidence threshold
 threshold = 0.70
-low_conf_mask = np.max(y_pred_proba_test, axis=1) < threshold
-print(f"⚙️ 2. Hybrid Selector (Threshold = {{threshold}})")
-print(f"🔍 Delegating {{np.sum(low_conf_mask)}} low-confidence samples to Super Agent...")
+conf_test = np.max(y_pred_proba_test, axis=1)      # deep model's confidence on test
+low_conf_mask = conf_test < threshold
 
-print(f"\\n🤖 3. Training {model_name} LightGBM Super Agent Feedback Loop...")
-while loop < 5: # Limit loops to cap accuracy at ~90%
-    X_tr = scaler_ag.fit_transform(df_train_ag_loop[features].values)
-    y_tr = df_train_ag_loop["label"].values
-    
-    clf = lgb.LGBMClassifier(random_state=42, class_weight='balanced')
-    clf.fit(X_tr, y_tr)
-    
-    X_te = scaler_ag.transform(df_test_orig[features].values)
-    y_pred_ag = clf.predict(X_te)
-    y_proba_ag = clf.predict_proba(X_te)
-    
-    acc = accuracy_score(df_test_orig["label"].values, y_pred_ag)
-    print(f"🔁 Loop {{loop+1}}: Agent Accuracy = {{acc:.4f}}")
-    
-    if acc >= 0.88:
-        print("✅ Target reached.")
-        break
-        
-    misclassified = df_test_orig[y_pred_ag != df_test_orig["label"]].copy()
-    misclassified["hash"] = misclassified.apply(lambda r: sha1(str(r.to_dict()).encode()).hexdigest(), axis=1)
-    new_errs = misclassified[~misclassified["hash"].isin(known_hashes)]
-    
-    if new_errs.empty: break
-    
-    known_hashes.update(new_errs["hash"])
-    df_train_ag_loop = pd.concat([df_train_ag_loop, new_errs.drop(columns=["hash"])], ignore_index=True)
-    loop += 1
+# Agent prediction on test (features only, never uses test label)
+X_te = scaler_ag.transform(df_test_ag[features].values)
+agent_pred_test = clf.predict(X_te)
+
+# High confidence -> deep model; low confidence -> Agent
+final_pred = np.where(low_conf_mask, agent_pred_test, y_pred_hybrid_test)
+hybrid_acc = accuracy_score(y_test_encoded, final_pred)
+
+print(f"⚙️ Hybrid Selector (Threshold = {{threshold}})")
+print(f"🔍 Delegated {{low_conf_mask.sum()}} / {{len(low_conf_mask)}} low-confidence cases to Agent")
+print(f"🏆 Hybrid System Accuracy (test): {{hybrid_acc:.4f}}")
 
 # Save Super Agent Weights & Scaler
 import shutil
@@ -599,11 +586,13 @@ shutil.copy(tmp_agent_path, agent_path)
 joblib.dump(scaler_ag, scaler_path)
 print(f"✅ Saved {model_name} Agent to {{agent_path}}")
 
-# Save Results
+# Store all three predictions for separate evaluation
 all_results['{model_name}'] = {{
     'y_true': y_test_encoded,
-    'y_pred': y_pred_ag,
-    'y_proba': y_proba_ag
+    'y_pred_deep': y_pred_hybrid_test,
+    'y_pred_agent': agent_pred_test,
+    'y_pred_hybrid': final_pred,
+    'y_proba': y_pred_proba_test
 }}
 print(f"✅ {model_name} pipeline complete.")
 """))
@@ -722,33 +711,36 @@ metrics_data = []
 
 for model_name, res in all_results.items():
     y_true = res['y_true']
-    y_pred = res['y_pred']
     y_proba = res['y_proba']
     
-    acc = accuracy_score(y_true, y_pred)
-    prec = precision_score(y_true, y_pred, average='macro')
-    rec = recall_score(y_true, y_pred, average='macro')
-    f1 = f1_score(y_true, y_pred, average='macro')
-    kappa = cohen_kappa_score(y_true, y_pred, weights='quadratic') # QWK
-    
-    # Calculate specificity per class and average
-    cm = confusion_matrix(y_true, y_pred)
-    specs = []
-    for i in range(len(CLASS_NAMES)):
-        tn = np.sum(cm) - np.sum(cm[i,:]) - np.sum(cm[:,i]) + cm[i,i]
-        fp = np.sum(cm[:,i]) - cm[i,i]
-        specs.append(tn / (tn + fp + 1e-6))
-    spec = np.mean(specs)
-    
-    metrics_data.append({
-        'Model': model_name,
-        'Accuracy': acc,
-        'Precision (PPV)': prec,
-        'Sensitivity (Recall)': rec,
-        'Specificity': spec,
-        'F1-Score': f1,
-        'QWK': kappa
-    })
+    for variant, y_pred in [('Deep', res['y_pred_deep']), 
+                            ('Agent', res['y_pred_agent']), 
+                            ('Hybrid', res['y_pred_hybrid'])]:
+        
+        acc = accuracy_score(y_true, y_pred)
+        prec = precision_score(y_true, y_pred, average='macro', zero_division=0)
+        rec = recall_score(y_true, y_pred, average='macro', zero_division=0)
+        f1 = f1_score(y_true, y_pred, average='macro', zero_division=0)
+        kappa = cohen_kappa_score(y_true, y_pred, weights='quadratic') # QWK
+        
+        # Calculate specificity per class and average
+        cm = confusion_matrix(y_true, y_pred)
+        specs = []
+        for i in range(len(CLASS_NAMES)):
+            tn = np.sum(cm) - np.sum(cm[i,:]) - np.sum(cm[:,i]) + cm[i,i]
+            fp = np.sum(cm[:,i]) - cm[i,i]
+            specs.append(tn / (tn + fp + 1e-6))
+        spec = np.mean(specs)
+        
+        metrics_data.append({
+            'Model': f"{model_name} ({variant})",
+            'Accuracy': acc,
+            'Precision (PPV)': prec,
+            'Sensitivity (Recall)': rec,
+            'Specificity': spec,
+            'F1-Score': f1,
+            'QWK': kappa
+        })
 
 df_metrics = pd.DataFrame(metrics_data)
 print("=== Unified Performance Comparison Table ===")

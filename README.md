@@ -119,6 +119,17 @@ results/
 
 Each folder contains: `best_hybrid_model.h5`, `scaler.pkl`, `label_encoder.pkl`, `umap_model.pkl`.
 
+### 6. Super Agent Hybrid Routing (New!)
+The training scripts have been completely refactored to eliminate test-data leakage. 
+The system now implements a clean **One-Shot Training** method for the Super Agent (LightGBM) using purely the training dataset.
+
+**Hybrid Routing Logic:**
+During evaluation, the system utilizes a **Confidence Threshold (default 0.70)**:
+- If Deep Learning Confidence ≥ 0.70 ➔ Prediction is handled purely by the Deep Learning model.
+- If Deep Learning Confidence < 0.70 ➔ The case is delegated to the Super Agent (LightGBM) which utilizes UMAP and Handcrafted features for the final prediction.
+
+*You can override the default threshold using the `--threshold` argument.*
+
 ---
 
 ## 📊 Paper Evaluations Workflow

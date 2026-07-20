@@ -79,7 +79,7 @@ def load_all_images(dir_list, dataset_name):
                 tasks.append((img_path, folder_cls))
                 
     print(f"  Memproses {len(tasks)} gambar secara paralel menggunakan semua core CPU...")
-    results = Parallel(n_jobs=16, batch_size=32)(delayed(process_single_image)(p, c) for p, c in tasks)
+    results = Parallel(n_jobs=16, batch_size=32, verbose=10)(delayed(process_single_image)(p, c) for p, c in tasks)
     
     for r in results:
         if r is not None:
@@ -101,6 +101,7 @@ def load_tmc_ucm(tmc_root, split_filter=None):
     if split_filter is None or split_filter == 'Test':
         txt_files.append('test.txt')
 
+    tasks = []
     for txt_file in txt_files:
         fp = os.path.join(tmc_root, txt_file)
         if not os.path.exists(fp):
@@ -121,13 +122,18 @@ def load_tmc_ucm(tmc_root, split_filter=None):
                     continue
                 if any(k in fname.lower() for k in IGNORE_KEYWORDS):
                     continue
-                img = cv2.imread(img_path)
-                if img is None:
-                    continue
-                img = cv2.resize(img, IMG_SIZE)
-                img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-                all_imgs.append(img_rgb)
-                all_feats.append(extract_combined_features(img_rgb))
-                all_labels.append(INT_TO_LABEL.get(label_int, f'MES{label_int}'))
-                all_paths.append(img_path)
+                    
+                folder_cls_str = INT_TO_LABEL.get(label_int, f'MES{label_int}')
+                tasks.append((img_path, folder_cls_str))
+                
+    print(f"  Memproses {len(tasks)} gambar TMC-UCM secara paralel...")
+    results = Parallel(n_jobs=16, batch_size=32, verbose=10)(delayed(process_single_image)(p, c) for p, c in tasks)
+    
+    for r in results:
+        if r is not None:
+            all_imgs.append(r[0])
+            all_feats.append(r[1])
+            all_labels.append(r[2])
+            all_paths.append(r[3])
+            
     return all_imgs, all_feats, all_labels, all_paths

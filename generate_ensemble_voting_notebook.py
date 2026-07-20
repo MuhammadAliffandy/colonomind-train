@@ -1,0 +1,211 @@
+import json
+import os
+import argparse
+
+def new_markdown_cell(text):
+    return {"cell_type": "markdown", "metadata": {}, "source": [line + '\n' for line in text.split('\n')]}
+
+def new_code_cell(code):
+    return {"cell_type": "code", "execution_count": None, "metadata": {}, "outputs": [], "source": [line + '\n' for line in code.split('\n')]}
+
+def generate_notebook():
+    cells = []
+    
+    cells.append(new_markdown_cell(
+        "# ColonoMind TMC-UCM Ensemble Voting Evaluation\n"
+        "This notebook evaluates an ensemble of 5 Hybrid Models trained on TMC-UCM (Patient-Level Split).\n"
+        "It evaluates them on completely unseen domains: NTUH and LIMUC.\n\n"
+        "**Voting Logic:**\n"
+        "- All 5 models predict an image (using internal 0.70 Confidence Hybrid Routing).\n"
+        "- The ensemble takes a Majority Vote with thresholds of 3/5, 4/5, or 5/5.\n"
+        "- If agreement is below threshold, the image is flagged: **Refer to Doctor**.\n"
+    ))
+    
+    cells.append(new_code_cell(
+        "import os\n"
+        "import joblib\n"
+        "import numpy as np\n"
+        "import pandas as pd\n"
+        "import cv2\n"
+        "import pywt\n"
+        "import scipy.stats\n"
+        "from skimage.feature import graycomatrix, graycoprops\n"
+        "from sklearn.metrics import accuracy_score\n"
+        "from sklearn.preprocessing import LabelEncoder\n"
+        "import lightgbm as lgb\n"
+        "from collections import Counter\n"
+        "import tensorflow as tf\n"
+        "from tensorflow.keras.models import load_model\n"
+        "import matplotlib.pyplot as plt\n"
+    ))
+    
+    cells.append(new_markdown_cell("## 1. Setup Data Paths and Config"))
+    cells.append(new_code_cell(
+        "BASE_DIR = '../..'\n"
+        "MODELS_DIR = f'{BASE_DIR}/Result/Intra_TMC-UCM'\n"
+        "TEST_DATASETS = {\n"
+        "    'NTUH': [f'{BASE_DIR}/Dataset+Code/MES classification_20250313', f'{BASE_DIR}/Dataset+Code/MES classification_20250724'],\n"
+        "    'LIMUC': [f'{BASE_DIR}/Dataset/LIMUC/train_and_validation_sets', f'{BASE_DIR}/Dataset/LIMUC/test_set']\n"
+        "}\n"
+        "MODEL_NAMES = ['ResNet-50', 'DenseNet-121', 'EfficientNet-B4', 'ConvNeXt-Tiny', 'ViT-B-16']\n"
+        "CLASS_NAMES = ['MES0', 'MES1', 'MES2', 'MES3']\n"
+        "DATASET_CLASS_FOLDERS = {\n"
+        "    'NTUH': ['MES0', 'MES1', 'MES2', 'MES3'],\n"
+        "    'LIMUC': ['Mayo 0', 'Mayo 1', 'Mayo 2', 'Mayo 3']\n"
+        "}\n"
+        "FOLDER_TO_LABEL = {\n"
+        "    'MES0': 'MES0', 'MES1': 'MES1', 'MES2': 'MES2', 'MES3': 'MES3',\n"
+        "    'Mayo 0': 'MES0', 'Mayo 1': 'MES1', 'Mayo 2': 'MES2', 'Mayo 3': 'MES3'\n"
+        "}\n"
+        "THRESHOLD_CONFIDENCE = 0.70\n"
+    ))
+
+    cells.append(new_markdown_cell("## 2. Helper Functions (Loading Data & Features)"))
+    cells.append(new_code_cell(
+        "def focal_loss(gamma=2., alpha=0.25):\n"
+        "    def focal_loss_fixed(y_true, y_pred):\n"
+        "        pt_1 = tf.where(tf.equal(y_true, 1), y_pred, tf.ones_like(y_pred))\n"
+        "        pt_0 = tf.where(tf.equal(y_true, 0), y_pred, tf.zeros_like(y_pred))\n"
+        "        return -tf.reduce_sum(alpha * tf.pow(1. - pt_1, gamma) * tf.math.log(pt_1 + 1e-7)) \\\n"
+        "               -tf.reduce_sum((1 - alpha) * tf.pow(pt_0, gamma) * tf.math.log(1. - pt_0 + 1e-7))\n"
+        "    return focal_loss_fixed\n\n"
+        "def extract_features(image):\n"
+        "    gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)\n"
+        "    coeffs2 = pywt.dwt2(gray, 'db1')\n"
+        "    LL, (LH, HL, HH) = coeffs2\n"
+        "    def stats(subband):\n"
+        "        return [np.mean(subband), np.std(subband), np.var(subband), scipy.stats.entropy(np.abs(subband.flatten()) + 1e-6)]\n"
+        "    hh_energy = np.sum(np.square(HH)) / HH.size\n"
+        "    wavelet = stats(LL) + stats(LH) + stats(HL) + stats(HH) + [hh_energy]\n\n"
+        "    distances = [1, 3, 5]\n"
+        "    angles = [0, np.pi/4, np.pi/2, 3*np.pi/4]\n"
+        "    glcm = graycomatrix(gray, distances=distances, angles=angles, levels=256, symmetric=True, normed=True)\n"
+        "    glcm_feat = [\n"
+        "        np.mean(graycoprops(glcm, 'contrast')),\n"
+        "        np.mean(graycoprops(glcm, 'dissimilarity')),\n"
+        "        np.mean(graycoprops(glcm, 'homogeneity'))\n"
+        "    ]\n"
+        "    return wavelet + glcm_feat\n\n"
+        "def load_dataset(dataset_name, paths):\n"
+        "    all_imgs, all_feats, all_labels = [], [], []\n"
+        "    folder_names = DATASET_CLASS_FOLDERS.get(dataset_name, CLASS_NAMES)\n"
+        "    for p in paths:\n"
+        "        for folder in folder_names:\n"
+        "            cls_dir = os.path.join(p, folder)\n"
+        "            if not os.path.exists(cls_dir): continue\n"
+        "            for file_name in os.listdir(cls_dir):\n"
+        "                if file_name.lower().endswith(('.png', '.jpg', '.jpeg')):\n"
+        "                    img_path = os.path.join(cls_dir, file_name)\n"
+        "                    img = cv2.imread(img_path)\n"
+        "                    if img is not None:\n"
+        "                        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)\n"
+        "                        img_resized = cv2.resize(img_rgb, (224, 224))\n"
+        "                        all_imgs.append(img_resized)\n"
+        "                        all_feats.append(extract_features(img_resized))\n"
+        "                        all_labels.append(FOLDER_TO_LABEL[folder])\n"
+        "    return np.array(all_imgs, dtype=np.float32), np.array(all_feats), np.array(all_labels)\n"
+    ))
+
+    cells.append(new_markdown_cell("## 3. Load 5 Models Trained on TMC-UCM"))
+    cells.append(new_code_cell(
+        "models, scalers, agents = {}, {}, {}\n"
+        "for model_name in MODEL_NAMES:\n"
+        "    exp_dir = f'{MODELS_DIR}/{model_name}_Experiment'\n"
+        "    if not os.path.exists(exp_dir):\n"
+        "        print(f'❌ Missing model {model_name}')\n"
+        "        continue\n"
+        "    keras_model = load_model(f'{exp_dir}/{model_name}_hybrid.h5', custom_objects={'focal_loss_fixed': focal_loss(gamma=2.5, alpha=0.25)})\n"
+        "    scaler_ag = joblib.load(f'{exp_dir}/{model_name}_scaler.pkl')\n"
+        "    agent_model = lgb.Booster(model_file=f'{exp_dir}/{model_name}_agent.txt')\n"
+        "    models[model_name] = keras_model\n"
+        "    scalers[model_name] = scaler_ag\n"
+        "    agents[model_name] = agent_model\n"
+        "    print(f'✅ Loaded {model_name}')\n"
+    ))
+    
+    cells.append(new_markdown_cell("## 4. Run Voting Ensemble Evaluation"))
+    cells.append(new_code_cell(
+        "def get_majority_vote(predictions, threshold):\n"
+        "    counter = Counter(predictions)\n"
+        "    most_common_pred, count = counter.most_common(1)[0]\n"
+        "    return most_common_pred if count >= threshold else -1\n\n"
+        "le = LabelEncoder()\n"
+        "le.fit(CLASS_NAMES)\n\n"
+        "for test_dataset, paths in TEST_DATASETS.items():\n"
+        "    print(f'\\n=============================================')\n"
+        "    print(f'🧪 Testing Ensemble on {test_dataset}')\n"
+        "    print(f'=============================================')\n"
+        "    X_img, X_feat, labels = load_dataset(test_dataset, paths)\n"
+        "    y_true = le.transform(labels)\n"
+        "    \n"
+        "    # Using ResNet-50's UMAP & Scaler as the global feature projection (as trained on TMC-UCM)\n"
+        "    exp_dir = f'{MODELS_DIR}/ResNet-50_Experiment'\n"
+        "    feat_scaler = joblib.load(f'{exp_dir}/scaler.pkl')\n"
+        "    umap_reducer = joblib.load(f'{exp_dir}/umap_model.pkl')\n"
+        "    \n"
+        "    X_feat_sc = feat_scaler.transform(X_feat)\n"
+        "    X_umap = umap_reducer.transform(X_feat_sc)\n"
+        "    \n"
+        "    all_preds = []\n"
+        "    for name in MODEL_NAMES:\n"
+        "        y_proba = models[name].predict([X_img, X_feat_sc, X_umap], verbose=0)\n"
+        "        y_deep = np.argmax(y_proba, axis=1)\n"
+        "        conf_deep = np.max(y_proba, axis=1)\n"
+        "        \n"
+        "        df_ag = pd.DataFrame(X_feat_sc, columns=[f'f{j}' for j in range(20)])\n"
+        "        df_ag['confidence'] = conf_deep\n"
+        "        df_ag['umap_0'] = X_umap[:, 0]\n"
+        "        df_ag['umap_1'] = X_umap[:, 1]\n"
+        "        features = ['confidence', 'umap_0', 'umap_1'] + [f'f{j}' for j in range(20)]\n"
+        "        \n"
+        "        X_te_ag = scalers[name].transform(df_ag[features].values)\n"
+        "        y_ag_proba = agents[name].predict(X_te_ag)\n"
+        "        y_agent = np.argmax(y_ag_proba, axis=1)\n"
+        "        \n"
+        "        # Internal Hybrid Routing for this specific model\n"
+        "        y_hybrid = np.where(conf_deep < THRESHOLD_CONFIDENCE, y_agent, y_deep)\n"
+        "        all_preds.append(y_hybrid)\n"
+        "        \n"
+        "    all_preds = np.array(all_preds).T # Shape: (N_samples, 5 models)\n"
+        "    \n"
+        "    for v_thresh in [3, 4, 5]:\n"
+        "        final_preds = np.array([get_majority_vote(p, v_thresh) for p in all_preds])\n"
+        "        \n"
+        "        processed_mask = final_preds != -1\n"
+        "        referred = np.sum(~processed_mask)\n"
+        "        total = len(y_true)\n"
+        "        acc = accuracy_score(y_true[processed_mask], final_preds[processed_mask]) if np.sum(processed_mask) > 0 else 0.0\n"
+        "        \n"
+        "        print(f'\\n--- Voting Threshold: {v_thresh}/5 ---')\n"
+        "        print(f'Total Images: {total}')\n"
+        "        print(f'Referred to Doctor: {referred} ({(referred/total)*100:.2f}%)')\n"
+        "        print(f'Framework Accuracy: {acc*100:.2f}%')\n"
+        "        \n"
+        "        for cls_idx, cls_name in enumerate(CLASS_NAMES):\n"
+        "            cls_mask = (y_true == cls_idx) & processed_mask\n"
+        "            cls_total = np.sum((y_true == cls_idx) & processed_mask)\n"
+        "            if cls_total > 0:\n"
+        "                c_acc = np.sum(final_preds[cls_mask] == y_true[cls_mask]) / cls_total\n"
+        "                print(f'  {cls_name} Accuracy: {c_acc*100:.2f}%')\n"
+        "            else:\n"
+        "                print(f'  {cls_name} Accuracy: N/A (all referred)')\n"
+    ))
+
+    notebook = {
+        "cells": cells,
+        "metadata": {
+            "kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"},
+            "language_info": {"codemirror_mode": {"name": "ipython", "version": 3}, "file_extension": ".py", "mimetype": "text/x-python", "name": "python", "nbconvert_exporter": "python", "pygments_lexer": "ipython3", "version": "3.8.0"}
+        },
+        "nbformat": 4,
+        "nbformat_minor": 4
+    }
+    
+    os.makedirs('ColonomindComparasion/Ensemble_Experiment', exist_ok=True)
+    out_path = 'ColonomindComparasion/Ensemble_Experiment/ColonoMind_TMC_Ensemble_Voting.ipynb'
+    with open(out_path, 'w') as f:
+        json.dump(notebook, f, indent=2)
+    print(f"✅ Generated {out_path}")
+
+if __name__ == '__main__':
+    generate_notebook()

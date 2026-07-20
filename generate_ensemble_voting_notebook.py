@@ -41,7 +41,7 @@ def generate_notebook():
     
     cells.append(new_markdown_cell("## 1. Setup Data Paths and Config"))
     cells.append(new_code_cell(
-        "BASE_DIR = '../..'\n"
+        "BASE_DIR = '/home/D13K48009/raid/Clara/new_drive'\n"
         "MODELS_DIR = f'{BASE_DIR}/Result/Intra_TMC-UCM'\n"
         "TEST_DATASETS = {\n"
         "    'NTUH': [f'{BASE_DIR}/Dataset+Code/MES classification_20250313', f'{BASE_DIR}/Dataset+Code/MES classification_20250724'],\n"

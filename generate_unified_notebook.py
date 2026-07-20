@@ -513,6 +513,9 @@ plt.savefig(os.path.join(save_dir, f'{model_name}_Training_Curve.png'), bbox_inc
 plt.show()
 """))
 
+        cells.append(new_markdown_cell(f"### 🤖 Super Agent & Hybrid Routing ({model_name})\n"
+                                       f"**Update:** This section implements the **One-Shot Training** architecture to eliminate test data leakage. The LightGBM agent is trained *only once* using purely the training set.\n"
+                                       f"During evaluation, the system applies a **Confidence Threshold (0.70)**. Cases where the deep learning model is unsure (< 0.70) are delegated to the Super Agent for the final decision."))
         cells.append(new_code_cell(f"""# --- 2. SUPER AGENT CONTINUAL LEARNING ({model_name}) ---
 # Generate predictions
 y_pred_proba_test = model_{model_name.replace('-', '_')}.predict(test_inputs, verbose=0)

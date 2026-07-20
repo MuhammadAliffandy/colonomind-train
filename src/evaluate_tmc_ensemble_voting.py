@@ -120,13 +120,14 @@ def main():
     print("Loading pre-trained TMC-UCM models...")
     for model_name in model_names:
         exp_dir = os.path.join(args.models_dir, f"{model_name}_Experiment")
-        if not os.path.exists(exp_dir):
-            print(f"⚠️ Model directory {exp_dir} not found. Automatically training {model_name} on TMC-UCM...")
+        model_path = os.path.join(exp_dir, f"{model_name}_hybrid.h5")
+        if not os.path.exists(model_path):
+            print(f"⚠️ Model file {model_path} not found. Automatically training {model_name} on TMC-UCM...")
             cmd = f"python src/train_dgx.py --scenario Intra --train_dataset TMC-UCM --test_dataset TMC-UCM --model {model_name} --base_dir {args.base_dir}"
             subprocess.run(cmd, shell=True, check=True)
             print(f"✅ Auto-training for {model_name} completed.")
             
-        keras_model = load_model(os.path.join(exp_dir, f"{model_name}_hybrid.h5"), custom_objects={'focal_loss_fixed': focal_loss(gamma=2.5, alpha=0.25)})
+        keras_model = load_model(model_path, custom_objects={'focal_loss_fixed': focal_loss(gamma=2.5, alpha=0.25)})
         scaler_ag = joblib.load(os.path.join(exp_dir, f"{model_name}_scaler.pkl"))
         agent_model = lgb.Booster(model_file=os.path.join(exp_dir, f"{model_name}_agent.txt"))
         

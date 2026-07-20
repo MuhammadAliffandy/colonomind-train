@@ -123,7 +123,7 @@ def main():
         model_path = os.path.join(exp_dir, f"{model_name}_hybrid.h5")
         if not os.path.exists(model_path):
             print(f"⚠️ Model file {model_path} not found. Automatically training {model_name} on TMC-UCM...")
-            cmd = f"python src/train_dgx.py --scenario Intra --train_dataset TMC-UCM --test_dataset TMC-UCM --model {model_name} --base_dir {args.base_dir}"
+            cmd = f"python -u src/train_dgx.py --scenario Intra --train_dataset TMC-UCM --test_dataset TMC-UCM --model {model_name} --base_dir {args.base_dir}"
             subprocess.run(cmd, shell=True, check=True)
             print(f"✅ Auto-training for {model_name} completed.")
             

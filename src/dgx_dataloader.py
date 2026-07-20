@@ -102,6 +102,12 @@ def load_tmc_ucm(tmc_root, split_filter=None):
         txt_files.append('test.txt')
 
     tasks = []
+    
+    # Preload existing files to avoid slow os.path.exists calls on network drives
+    existing_images = set()
+    if os.path.exists(images_dir):
+        existing_images = set(os.listdir(images_dir))
+        
     for txt_file in txt_files:
         fp = os.path.join(tmc_root, txt_file)
         if not os.path.exists(fp):
@@ -117,9 +123,10 @@ def load_tmc_ucm(tmc_root, split_filter=None):
                     label_int = int(parts[1])
                 except ValueError:
                     continue
-                img_path = os.path.join(images_dir, fname)
-                if not os.path.exists(img_path):
+                
+                if fname not in existing_images:
                     continue
+                img_path = os.path.join(images_dir, fname)
                 if any(k in fname.lower() for k in IGNORE_KEYWORDS):
                     continue
                     

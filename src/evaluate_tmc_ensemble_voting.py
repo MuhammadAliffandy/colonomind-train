@@ -78,16 +78,28 @@ def evaluate_ensemble(X_img, X_feat, X_umap, y_true, models, scalers, agents, th
     
     # Per-class accuracy
     print("Per-class Accuracy (on processed):")
+    per_class_acc = {}
     for cls in np.unique(y_true):
         cls_mask = (y_true == cls) & processed_mask
         cls_total = np.sum((y_true == cls) & processed_mask) # only count processed ones of this class
         if cls_total > 0:
             cls_acc = np.sum(final_preds[cls_mask] == y_true[cls_mask]) / cls_total
             print(f"  Class {cls}: {cls_acc*100:.2f}%")
+            per_class_acc[f"Class_{cls}"] = float(cls_acc)
         else:
             print(f"  Class {cls}: N/A (all referred)")
+            per_class_acc[f"Class_{cls}"] = None
             
-    return framework_acc, referred_count
+    metrics = {
+        "Voting_Threshold": f"{voting_threshold}/{len(models)}",
+        "Total_Images": int(total_count),
+        "Referred_to_Doctor_Count": int(referred_count),
+        "Referred_to_Doctor_Percentage": float(referred_count/total_count) * 100,
+        "Framework_Accuracy": float(framework_acc),
+        "Per_Class_Accuracy": per_class_acc
+    }
+            
+    return metrics
 
 def main():
     parser = argparse.ArgumentParser(description="Ensemble Voting Evaluation (TMC-UCM -> NTUH/LIMUC)")
@@ -157,13 +169,23 @@ def main():
         X_feat_scaled = feat_scaler.transform(X_feat)
         X_umap = umap_reducer.transform(X_feat_scaled)
         
+        dataset_results = []
         for v_thresh in [3, 4, 5]:
-            evaluate_ensemble(
+            metrics = evaluate_ensemble(
                 X_img, X_feat_scaled, X_umap, y_encoded,
                 models, scalers, agents,
                 threshold_confidence=args.threshold_confidence,
                 voting_threshold=v_thresh
             )
+            dataset_results.append(metrics)
+            
+        # Save results to a folder
+        save_dir = f"{BASE_DIR}/Result/Ensemble_Voting_Experiment"
+        os.makedirs(save_dir, exist_ok=True)
+        out_path = os.path.join(save_dir, f"voting_metrics_{test_dataset}.json")
+        with open(out_path, 'w') as f:
+            json.dump(dataset_results, f, indent=4)
+        print(f"✅ Saved results to {out_path}")
 
 if __name__ == "__main__":
     main()

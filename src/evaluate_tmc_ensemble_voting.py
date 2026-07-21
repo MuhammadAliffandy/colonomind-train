@@ -106,7 +106,7 @@ def main():
     parser = argparse.ArgumentParser(description="Ensemble Voting Evaluation (TMC-UCM -> NTUH/LIMUC)")
     parser.add_argument("--base_dir", type=str, default="..")
     parser.add_argument("--models_dir", type=str, default="../Result/Intra_TMC-UCM", help="Path where TMC-UCM models are saved")
-    parser.add_argument("--threshold_confidence", type=float, default=0.70, help="Hybrid routing confidence threshold")
+    parser.add_argument("--threshold_confidence", type=float, default=0.50, help="Hybrid routing confidence threshold")
     args = parser.parse_args()
     
     BASE_DIR = args.base_dir

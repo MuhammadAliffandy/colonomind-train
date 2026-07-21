@@ -28,10 +28,10 @@ def main():
     parser.add_argument("--test_dataset", type=str, required=True, choices=['NTUH', 'LIMUC', 'TMC-UCM'])
     parser.add_argument("--model", type=str, required=True, choices=list(MODEL_BUILDERS.keys()))
     parser.add_argument("--base_dir", type=str, default="..", help="Base directory where Dataset and Dataset+Code folders are located")
-    parser.add_argument('--threshold', type=float, default=0.70, help="Confidence threshold for hybrid routing (default: 0.70)")
+    parser.add_argument('--threshold', type=float, default=0.50, help='Confidence threshold for hybrid routing (default: 0.50)')
     args = parser.parse_args()
 
-    print(f"\\n{'='*50}")
+    print(f"\n{'='*50}")
     print(f"🚀 Starting Training on DGX")
     print(f"Scenario: {args.scenario}")
     print(f"Train Dataset: {args.train_dataset}")

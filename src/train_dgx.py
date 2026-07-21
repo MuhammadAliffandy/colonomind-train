@@ -188,9 +188,21 @@ def main():
     
     features = ["confidence", "umap_0", "umap_1"] + [f"f{i}" for i in range(20)]
     scaler_ag = StandardScaler()
-    X_tr = scaler_ag.fit_transform(df_train_ag[features].values)
-    y_tr = y_train_encoded
     
+    # Train Agent ONLY on low confidence training data so it becomes a "Hard Case Expert"
+    conf_train = df_train_ag["confidence"].values
+    low_conf_mask_tr = conf_train < args.threshold
+    
+    # If we have enough hard cases, train only on them. Otherwise fallback to all.
+    if np.sum(low_conf_mask_tr) > 100:
+        print(f"  -> Training Agent strictly on {np.sum(low_conf_mask_tr)} hard cases (Confidence < {args.threshold})")
+        X_tr = scaler_ag.fit_transform(df_train_ag[low_conf_mask_tr][features].values)
+        y_tr = y_train_encoded[low_conf_mask_tr]
+    else:
+        print(f"  -> Training Agent on all {len(df_train_ag)} cases (Not enough hard cases)")
+        X_tr = scaler_ag.fit_transform(df_train_ag[features].values)
+        y_tr = y_train_encoded
+        
     clf = lgb.LGBMClassifier(random_state=42, class_weight='balanced')
     clf.fit(X_tr, y_tr)
     

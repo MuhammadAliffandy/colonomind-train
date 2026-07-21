@@ -134,7 +134,30 @@ def main():
             subprocess.run(cmd, shell=True, check=True)
             print(f"✅ Auto-training for {model_name} completed.")
             
-        keras_model = load_model(model_path, compile=False, custom_objects={'KerasLayer': hub.KerasLayer})
+        # Dynamically map the correct preprocess_input to fix legacy keras saving bug
+        if model_name == 'ResNet-50':
+            from tensorflow.keras.applications.resnet50 import preprocess_input as prep
+        elif model_name == 'DenseNet-121':
+            from tensorflow.keras.applications.densenet import preprocess_input as prep
+        elif model_name == 'EfficientNet-B4':
+            from tensorflow.keras.applications.efficientnet import preprocess_input as prep
+        elif model_name == 'ConvNeXt-Tiny':
+            from tensorflow.keras.applications.convnext import preprocess_input as prep
+        else:
+            prep = lambda img: (img / 127.5) - 1.0
+
+        custom_objs = {
+            'KerasLayer': hub.KerasLayer,
+            'preprocess_input': prep,
+            '<lambda>': prep,
+            'resnet50_preprocess': prep,
+            'densenet_preprocess': prep,
+            'efficientnet_preprocess': prep,
+            'convnext_preprocess': prep,
+            'vit_preprocess': prep
+        }
+        
+        keras_model = load_model(model_path, compile=False, custom_objects=custom_objs)
         scaler_ag = joblib.load(os.path.join(exp_dir, f"{model_name}_scaler.pkl"))
         agent_model = lgb.Booster(model_file=os.path.join(exp_dir, f"{model_name}_agent.txt"))
         

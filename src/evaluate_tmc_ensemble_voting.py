@@ -11,6 +11,7 @@ from dgx_models import build_hybrid_model, MODEL_BUILDERS, focal_loss
 from sklearn.preprocessing import LabelEncoder
 import lightgbm as lgb
 from collections import Counter
+import tensorflow_hub as hub
 
 def get_majority_vote(predictions, threshold):
     """
@@ -127,7 +128,11 @@ def main():
             subprocess.run(cmd, shell=True, check=True)
             print(f"✅ Auto-training for {model_name} completed.")
             
-        keras_model = load_model(model_path, custom_objects={'focal_loss_fixed': focal_loss(gamma=2.5, alpha=0.25)})
+        keras_model = load_model(model_path, custom_objects={
+            'loss': focal_loss(gamma=2.5, alpha=0.25),
+            'focal_loss_fixed': focal_loss(gamma=2.5, alpha=0.25),
+            'KerasLayer': hub.KerasLayer
+        })
         scaler_ag = joblib.load(os.path.join(exp_dir, f"{model_name}_scaler.pkl"))
         agent_model = lgb.Booster(model_file=os.path.join(exp_dir, f"{model_name}_agent.txt"))
         

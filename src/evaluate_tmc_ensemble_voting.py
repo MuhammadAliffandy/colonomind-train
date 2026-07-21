@@ -128,11 +128,7 @@ def main():
             subprocess.run(cmd, shell=True, check=True)
             print(f"✅ Auto-training for {model_name} completed.")
             
-        keras_model = load_model(model_path, custom_objects={
-            'loss': focal_loss(gamma=2.5, alpha=0.25),
-            'focal_loss_fixed': focal_loss(gamma=2.5, alpha=0.25),
-            'KerasLayer': hub.KerasLayer
-        })
+        keras_model = load_model(model_path, compile=False, custom_objects={'KerasLayer': hub.KerasLayer})
         scaler_ag = joblib.load(os.path.join(exp_dir, f"{model_name}_scaler.pkl"))
         agent_model = lgb.Booster(model_file=os.path.join(exp_dir, f"{model_name}_agent.txt"))
         

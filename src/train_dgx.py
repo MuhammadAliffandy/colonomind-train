@@ -164,7 +164,7 @@ def main():
         batch_size=16, epochs=100, class_weight=class_weight_dict, callbacks=callbacks, verbose=1
     )
 
-    model_path = os.path.join(BASE_SAVE_DIR, f"{args.model}_hybrid.h5")
+    model_path = os.path.join(BASE_SAVE_DIR, f"{args.model}_hybrid.keras")
     model.save(model_path)
     print(f"✅ Saved base model to {model_path}")
 

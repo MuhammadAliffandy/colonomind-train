@@ -5,6 +5,26 @@ from tensorflow.keras.regularizers import l2
 from tensorflow.keras.applications import ResNet50, DenseNet121, EfficientNetB4, ConvNeXtTiny
 import tensorflow_hub as hub
 
+@tf.keras.utils.register_keras_serializable(name="resnet50_preprocess")
+def resnet50_preprocess(x):
+    return tf.keras.applications.resnet50.preprocess_input(x)
+
+@tf.keras.utils.register_keras_serializable(name="densenet_preprocess")
+def densenet_preprocess(x):
+    return tf.keras.applications.densenet.preprocess_input(x)
+
+@tf.keras.utils.register_keras_serializable(name="efficientnet_preprocess")
+def efficientnet_preprocess(x):
+    return tf.keras.applications.efficientnet.preprocess_input(x)
+
+@tf.keras.utils.register_keras_serializable(name="convnext_preprocess")
+def convnext_preprocess(x):
+    return tf.keras.applications.convnext.preprocess_input(x)
+
+@tf.keras.utils.register_keras_serializable(name="vit_preprocess")
+def vit_preprocess(x):
+    return (x / 127.5) - 1.0
+
 def focal_loss(gamma=2.5, alpha=0.25):
     def loss(y_true, y_pred):
         y_pred = tf.clip_by_value(y_pred, 1e-8, 1.0)
@@ -43,7 +63,7 @@ def build_hybrid_model(branch_builder_func, image_input_shape, feat_input_shape,
 def create_ResNet_50_branch(input_shape, dropout_rate=0.5):
     image_input = Input(shape=input_shape, name='image_input_cnn')
     # Preprocess input specifically for ResNet50 (Caffe style)
-    x = Lambda(tf.keras.applications.resnet50.preprocess_input)(image_input)
+    x = Lambda(resnet50_preprocess)(image_input)
     aug = tf.keras.layers.RandomFlip("horizontal_and_vertical")(x)
     aug = tf.keras.layers.RandomRotation(0.2)(aug)
     aug = tf.keras.layers.RandomZoom(0.2)(aug)
@@ -61,7 +81,7 @@ def create_ResNet_50_branch(input_shape, dropout_rate=0.5):
 def create_DenseNet_121_branch(input_shape, dropout_rate=0.5):
     image_input = Input(shape=input_shape, name='image_input_cnn')
     # Preprocess input specifically for DenseNet121
-    x = Lambda(tf.keras.applications.densenet.preprocess_input)(image_input)
+    x = Lambda(densenet_preprocess)(image_input)
     aug = tf.keras.layers.RandomFlip("horizontal_and_vertical")(x)
     aug = tf.keras.layers.RandomRotation(0.2)(aug)
     aug = tf.keras.layers.RandomZoom(0.2)(aug)
@@ -79,7 +99,7 @@ def create_DenseNet_121_branch(input_shape, dropout_rate=0.5):
 def create_EfficientNet_B4_branch(input_shape, dropout_rate=0.5):
     image_input = Input(shape=input_shape, name='image_input_cnn')
     # Preprocess input specifically for EfficientNetB4
-    x = Lambda(tf.keras.applications.efficientnet.preprocess_input)(image_input)
+    x = Lambda(efficientnet_preprocess)(image_input)
     aug = tf.keras.layers.RandomFlip("horizontal_and_vertical")(x)
     aug = tf.keras.layers.RandomRotation(0.2)(aug)
     aug = tf.keras.layers.RandomZoom(0.2)(aug)
@@ -97,7 +117,7 @@ def create_EfficientNet_B4_branch(input_shape, dropout_rate=0.5):
 def create_ConvNeXt_Tiny_branch(input_shape, dropout_rate=0.5):
     image_input = Input(shape=input_shape, name='image_input_cnn')
     # Preprocess input specifically for ConvNeXtTiny
-    x = Lambda(tf.keras.applications.convnext.preprocess_input)(image_input)
+    x = Lambda(convnext_preprocess)(image_input)
     aug = tf.keras.layers.RandomFlip("horizontal_and_vertical")(x)
     aug = tf.keras.layers.RandomRotation(0.2)(aug)
     aug = tf.keras.layers.RandomZoom(0.2)(aug)
@@ -112,6 +132,7 @@ def create_ConvNeXt_Tiny_branch(input_shape, dropout_rate=0.5):
     x = Dropout(dropout_rate)(x)
     return Model(inputs=image_input, outputs=x, name="ConvNeXt_Branch")
 
+@tf.keras.utils.register_keras_serializable(name="ViT_B16_Wrapper")
 class ViT_B16_Wrapper(Layer):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -127,7 +148,7 @@ class ViT_B16_Wrapper(Layer):
 def create_ViT_B_16_branch(input_shape, dropout_rate=0.5):
     image_input = Input(shape=input_shape, name='image_input_vit')
     # Preprocess for ViT-B16 TF-Hub (expects [-1, 1])
-    x = Lambda(lambda img: (img / 127.5) - 1.0)(image_input)
+    x = Lambda(vit_preprocess)(image_input)
     aug = tf.keras.layers.RandomFlip("horizontal_and_vertical")(x)
     aug = tf.keras.layers.RandomRotation(0.2)(aug)
     aug = tf.keras.layers.RandomZoom(0.2)(aug)

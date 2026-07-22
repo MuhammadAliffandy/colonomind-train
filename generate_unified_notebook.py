@@ -389,6 +389,10 @@ X_train_umap = umap_reducer.fit_transform(X_feat_train_scaled)
 X_val_umap = umap_reducer.transform(X_feat_val_scaled)
 X_test_umap  = umap_reducer.transform(X_feat_test_scaled)
 
+# Save the base scaler and UMAP model
+joblib.dump(scaler, os.path.join(f"{BASE_SAVE_DIR}/UMAP_Experiment", 'base_scaler.pkl'))
+joblib.dump(umap_reducer, os.path.join(f"{BASE_SAVE_DIR}/UMAP_Experiment", 'umap_model.pkl'))
+
 plt.figure(figsize=(8,6))
 scatter = plt.scatter(X_train_umap[:,0], X_train_umap[:,1], c=y_train_encoded, cmap='viridis', alpha=0.7)
 plt.colorbar(scatter, label='Class Label')
@@ -515,7 +519,7 @@ plt.show()
 
         cells.append(new_markdown_cell(f"### 🤖 Super Agent & Hybrid Routing ({model_name})\n"
                                        f"**Update:** This section implements the **One-Shot Training** architecture to eliminate test data leakage. The LightGBM agent is trained *only once* using purely the training set.\n"
-                                       f"During evaluation, the system applies a **Confidence Threshold (0.70)**. Cases where the deep learning model is unsure (< 0.70) are delegated to the Super Agent for the final decision."))
+                                       f"During evaluation, the system applies a **Confidence Threshold (0.50)** (adjusted for Focal Loss probabilities). Cases where the deep learning model is unsure (< 0.50) are delegated to the Super Agent for the final decision."))
         cells.append(new_code_cell(f"""# --- 2. SUPER AGENT CONTINUAL LEARNING ({model_name}) ---
 # Generate predictions
 y_pred_proba_test = model_{model_name.replace('-', '_')}.predict(test_inputs, verbose=0)
@@ -550,8 +554,20 @@ features = ["confidence", "umap_0", "umap_1"] + [f"f{{i}}" for i in range(20)]
 # Train the Agent ONCE, on TRAIN only (no test leakage)
 print(f"\\n🤖 Training {model_name} LightGBM Super Agent (One-Shot)...")
 scaler_ag = StandardScaler()
-X_tr = scaler_ag.fit_transform(df_train_ag[features].values)
-y_tr = df_train_ag["label"].values
+# Train Agent ONLY on low confidence training data (Hard Cases)
+conf_train = df_train_ag["confidence"].values
+threshold = 0.50
+low_conf_mask_tr = conf_train < threshold
+
+if np.sum(low_conf_mask_tr) > 100:
+    print(f"  -> Training Agent strictly on {{np.sum(low_conf_mask_tr)}} hard cases (Confidence < {{threshold}})")
+    X_tr = scaler_ag.fit_transform(df_train_ag[low_conf_mask_tr][features].values)
+    y_tr = y_train_encoded[low_conf_mask_tr]
+else:
+    print(f"  -> Training Agent on all {{len(df_train_ag)}} cases (Not enough hard cases)")
+    X_tr = scaler_ag.fit_transform(df_train_ag[features].values)
+    y_tr = y_train_encoded
+
 clf = lgb.LGBMClassifier(random_state=42, class_weight='balanced')
 clf.fit(X_tr, y_tr)
 

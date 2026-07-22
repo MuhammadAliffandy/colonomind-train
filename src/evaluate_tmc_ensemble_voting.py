@@ -118,7 +118,7 @@ def main():
     agents = {}
     
     import subprocess
-    print("Loading pre-trained TMC-UCM models...")
+    print("Checking and Auto-Training missing TMC-UCM models...")
     for model_name in model_names:
         exp_dir = os.path.join(args.models_dir, f"{model_name}_Experiment")
         model_path = os.path.join(exp_dir, f"{model_name}_hybrid.keras")
@@ -127,12 +127,18 @@ def main():
             legacy_path = os.path.join(exp_dir, f"{model_name}_hybrid.h5")
             if os.path.exists(legacy_path):
                 model_path = legacy_path
-                print(f"  ⚠️ Using legacy .h5 file. Consider retraining to get .keras format.")
         if not os.path.exists(model_path):
             print(f"⚠️ Model file {model_path} not found. Automatically training {model_name} on TMC-UCM...")
             cmd = f"python -u src/train_dgx.py --scenario Intra --train_dataset TMC-UCM --test_dataset TMC-UCM --model {model_name} --base_dir {args.base_dir}"
             subprocess.run(cmd, shell=True, check=True)
             print(f"✅ Auto-training for {model_name} completed.")
+
+    print("\\nLoading pre-trained TMC-UCM models into memory...")
+    for model_name in model_names:
+        exp_dir = os.path.join(args.models_dir, f"{model_name}_Experiment")
+        model_path = os.path.join(exp_dir, f"{model_name}_hybrid.keras")
+        if not os.path.exists(model_path):
+            model_path = os.path.join(exp_dir, f"{model_name}_hybrid.h5")
             
         # Dynamically map the correct preprocess_input to fix legacy keras saving bug
         if model_name == 'ResNet-50':

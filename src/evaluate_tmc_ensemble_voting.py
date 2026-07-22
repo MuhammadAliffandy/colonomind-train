@@ -174,21 +174,32 @@ def main():
         agents[model_name] = LGBMWrapper(agent_model)
         print(f"✅ Loaded {model_name}")
         
-    # Test on NTUH and LIMUC
+    # Test on NTUH, LIMUC, and Combined
     le = LabelEncoder()
     le.fit(['MES0', 'MES1', 'MES2', 'MES3'])
     
-    DATASETS = {
-        'NTUH': [f'{BASE_DIR}/Dataset+Code/MES classification_20250313', f'{BASE_DIR}/Dataset+Code/MES classification_20250724'],
-        'LIMUC': [f'{BASE_DIR}/Dataset/LIMUC/train_and_validation_sets', f'{BASE_DIR}/Dataset/LIMUC/test_set']
+    ntuh_paths = [f'{BASE_DIR}/Dataset+Code/MES classification_20250313', f'{BASE_DIR}/Dataset+Code/MES classification_20250724']
+    limuc_paths = [f'{BASE_DIR}/Dataset/LIMUC/train_and_validation_sets', f'{BASE_DIR}/Dataset/LIMUC/test_set']
+    
+    print("Loading NTUH dataset...")
+    ntuh_imgs, ntuh_feats, ntuh_labels, _ = load_all_images(ntuh_paths, 'NTUH')
+    print("Loading LIMUC dataset...")
+    limuc_imgs, limuc_feats, limuc_labels, _ = load_all_images(limuc_paths, 'LIMUC')
+    
+    DATASETS_TO_EVALUATE = {
+        'NTUH': (ntuh_imgs, ntuh_feats, ntuh_labels),
+        'LIMUC': (limuc_imgs, limuc_feats, limuc_labels),
+        'Combined_NTUH_LIMUC': (
+            ntuh_imgs + limuc_imgs,
+            ntuh_feats + limuc_feats,
+            ntuh_labels + limuc_labels
+        )
     }
     
-    for test_dataset, paths in DATASETS.items():
+    for test_dataset, (all_imgs, all_feats, all_labels) in DATASETS_TO_EVALUATE.items():
         print(f"\n{'='*50}")
         print(f"🧪 Testing Ensemble on {test_dataset}")
         print(f"{'='*50}")
-        
-        all_imgs, all_feats, all_labels, _ = load_all_images(paths, test_dataset)
         
         X_img = np.array(all_imgs, dtype=np.float32)
         X_feat = np.array(all_feats)

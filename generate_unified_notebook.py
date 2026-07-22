@@ -553,7 +553,7 @@ features = ["confidence", "umap_0", "umap_1"] + [f"f{{i}}" for i in range(20)]
 
 # Train the Agent ONCE, on TRAIN only (no test leakage)
 print(f"\\n🤖 Training {model_name} LightGBM Super Agent (One-Shot)...")
-scaler_ag_{model_name.replace('-', '_')} = StandardScaler()
+scaler_ag = StandardScaler()
 # Train Agent ONLY on low confidence training data (Hard Cases)
 conf_train = df_train_ag["confidence"].values
 threshold = 0.50
@@ -561,15 +561,15 @@ low_conf_mask_tr = conf_train < threshold
 
 if np.sum(low_conf_mask_tr) > 100:
     print(f"  -> Training Agent strictly on {{np.sum(low_conf_mask_tr)}} hard cases (Confidence < {{threshold}})")
-    X_tr = scaler_ag_{model_name.replace('-', '_')}.fit_transform(df_train_ag[low_conf_mask_tr][features].values)
+    X_tr = scaler_ag.fit_transform(df_train_ag[low_conf_mask_tr][features].values)
     y_tr = y_train_encoded[low_conf_mask_tr]
 else:
     print(f"  -> Training Agent on all {{len(df_train_ag)}} cases (Not enough hard cases)")
-    X_tr = scaler_ag_{model_name.replace('-', '_')}.fit_transform(df_train_ag[features].values)
+    X_tr = scaler_ag.fit_transform(df_train_ag[features].values)
     y_tr = y_train_encoded
 
-clf_{model_name.replace('-', '_')} = lgb.LGBMClassifier(random_state=42, class_weight='balanced')
-clf_{model_name.replace('-', '_')}.fit(X_tr, y_tr)
+clf = lgb.LGBMClassifier(random_state=42, class_weight='balanced')
+clf.fit(X_tr, y_tr)
 
 # Base deep-model accuracy on test
 base_acc = accuracy_score(y_test_encoded, y_pred_hybrid_test)
@@ -581,8 +581,8 @@ conf_test = np.max(y_pred_proba_test, axis=1)      # deep model's confidence on 
 low_conf_mask = conf_test < threshold
 
 # Agent prediction on test (features only, never uses test label)
-X_te = scaler_ag_{model_name.replace('-', '_')}.transform(df_test_ag[features].values)
-agent_pred_test = clf_{model_name.replace('-', '_')}.predict(X_te)
+X_te = scaler_ag.transform(df_test_ag[features].values)
+agent_pred_test = clf.predict(X_te)
 
 # High confidence -> deep model; low confidence -> Agent
 final_pred = np.where(low_conf_mask, agent_pred_test, y_pred_hybrid_test)
@@ -594,23 +594,21 @@ print(f"🏆 Hybrid System Accuracy (test): {{hybrid_acc:.4f}}")
 
 # Save Super Agent Weights & Scaler
 import shutil
-save_dir_ag = f"{{BASE_SAVE_DIR}}/{model_name}_Experiment"
-agent_path = os.path.join(save_dir_ag, f"{model_name}_agent.txt")
-scaler_path = os.path.join(save_dir_ag, f"{model_name}_scaler.pkl")
+agent_path = os.path.join(f"{{BASE_SAVE_DIR}}/{model_name}_Experiment", f"{model_name}_agent.txt")
+scaler_path = os.path.join(f"{{BASE_SAVE_DIR}}/{model_name}_Experiment", f"{model_name}_scaler.pkl")
 
 # Robust save for LightGBM on Google Drive (avoids FUSE write errors)
 tmp_agent_path = f"/tmp/{model_name}_agent.txt"
-clf_{model_name.replace('-', '_')}.booster_.save_model(tmp_agent_path)
+clf.booster_.save_model(tmp_agent_path)
 shutil.copy(tmp_agent_path, agent_path)
 
-joblib.dump(scaler_ag_{model_name.replace('-', '_')}, scaler_path)
+joblib.dump(scaler_ag, scaler_path)
 print(f"✅ Saved {model_name} Agent to {{agent_path}}")
 
 # Store all three predictions for separate evaluation
 all_results['{model_name}'] = {{
     'y_true': y_test_encoded,
     'y_pred_deep': y_pred_hybrid_test,
-    'conf_deep': conf_test,
     'y_pred_agent': agent_pred_test,
     'y_pred_hybrid': final_pred,
     'y_proba': y_pred_proba_test

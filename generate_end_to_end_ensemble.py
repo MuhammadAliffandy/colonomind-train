@@ -843,32 +843,12 @@ print("✅ Full Notebook Execution Complete.")
     return nb_dict
 
 if __name__ == "__main__":
-    scenarios = [
-        ('Intra', 'NTUH', 'NTUH'),
-        ('Intra', 'LIMUC', 'LIMUC'),
-        ('Intra', 'TMC-UCM', 'TMC-UCM'),
-        ('Multi', 'NTUH', 'LIMUC'),
-        ('Multi', 'NTUH', 'TMC-UCM'),
-        ('Multi', 'LIMUC', 'NTUH'),
-        ('Multi', 'LIMUC', 'TMC-UCM'),
-        ('Multi', 'TMC-UCM', 'NTUH'),
-        ('Multi', 'TMC-UCM', 'LIMUC')
-    ]
-    
     base_dir = "ColonomindComparasion/Ensemble_Experiment"
     os.makedirs(base_dir, exist_ok=True)
     
+    nb = build_notebook('Intra', 'TMC-UCM', 'TMC-UCM')
+    out_path = os.path.join(base_dir, "ColonoMind_End_to_End_Ensemble.ipynb")
     
-    for s_type, tr_ds, te_ds in scenarios:
-        nb = build_notebook(s_type, tr_ds, te_ds)
-        
-        folder = f"{base_dir}/{s_type}_Domain"
-        if s_type == 'Intra':
-            filename = f"ColonoMind_Unified_Comparison_{s_type}_{tr_ds}.ipynb"
-        else:
-            filename = f"ColonoMind_Unified_Comparison_{s_type}_{tr_ds}_to_{te_ds}.ipynb"
-            
-        out_path = os.path.join(folder, filename)
-        with open(out_path, "w") as f:
-            json.dump(nb, f, indent=2)
-        print(f"✅ Generated {out_path}")
+    with open(out_path, "w") as f:
+        json.dump(nb, f, indent=2)
+    print(f"✅ Generated {out_path}")

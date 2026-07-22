@@ -135,6 +135,10 @@ def main():
     plt.savefig(os.path.join(BASE_SAVE_DIR, 'UMAP_Projection.png'), bbox_inches='tight', dpi=300)
     plt.close()
 
+    # Save the base scaler and UMAP model
+    joblib.dump(scaler, os.path.join(BASE_SAVE_DIR, 'base_scaler.pkl'))
+    joblib.dump(umap_reducer, os.path.join(BASE_SAVE_DIR, 'umap_model.pkl'))
+
     # Model Training
     print(f"\\n[1] Training Base Hybrid Model: {args.model}")
     from sklearn.utils.class_weight import compute_class_weight

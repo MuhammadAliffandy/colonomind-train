@@ -195,7 +195,7 @@ def main():
         y_encoded = le.transform(all_labels)
         
         umap_path = os.path.join(args.models_dir, f"ResNet-50_Experiment", "umap_model.pkl")
-        feat_scaler_path = os.path.join(args.models_dir, f"ResNet-50_Experiment", "scaler.pkl") 
+        feat_scaler_path = os.path.join(args.models_dir, f"ResNet-50_Experiment", "base_scaler.pkl") 
         
         feat_scaler = joblib.load(feat_scaler_path)
         umap_reducer = joblib.load(umap_path)

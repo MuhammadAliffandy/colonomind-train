@@ -128,12 +128,13 @@ if 'google.colab' in sys.modules:
 "TRAIN_DATASET = '" + train_dataset + "'\n"
 "TEST_DATASET  = '" + test_dataset + "'\n"
 """
-# Base Directory di Google Drive
+# Base Directory di Google Drive / DGX
 import sys
 if 'google.colab' in sys.modules:
     BASE_DIR = '/content/drive/MyDrive'
 else:
-    BASE_DIR = '.'
+    # Path DGX
+    BASE_DIR = '/home/D13K48009/raid/Clara/new_drive'
 
 # Dataset path mapping
 DATASET_PATHS = {

@@ -148,6 +148,12 @@ DATASET_PATHS = {
     ],
     'TMC-UCM': [
         f'{BASE_DIR}/Dataset/TMC-UCM/images'
+    ],
+    'Combined_NTUH_LIMUC': [
+        f'{BASE_DIR}/Dataset+Code/MES classification_20250313',
+        f'{BASE_DIR}/Dataset+Code/MES classification_20250724',
+        f'{BASE_DIR}/Dataset/LIMUC/train_and_validation_sets',
+        f'{BASE_DIR}/Dataset/LIMUC/test_set'
     ]
 }
 
@@ -183,11 +189,12 @@ CLASS_NAMES = ['MES0', 'MES1', 'MES2', 'MES3']
 IGNORE_KEYWORDS = ['augment', 'mask', 'seg', '._', 'crop']
 all_results = {}
 
-# Folder name mapping per dataset (karena LIMUC pakai 'Mayo X', bukan 'MESX')
+# Folder name mapping per dataset
 DATASET_CLASS_FOLDERS = {
     'NTUH':    ['MES0', 'MES1', 'MES2', 'MES3'],
     'LIMUC':   ['Mayo 0', 'Mayo 1', 'Mayo 2', 'Mayo 3'],
-    'TMC-UCM': ['MES0', 'MES1', 'MES2', 'MES3']
+    'TMC-UCM': ['MES0', 'MES1', 'MES2', 'MES3'],
+    'Combined_NTUH_LIMUC': ['MES0', 'MES1', 'MES2', 'MES3', 'Mayo 0', 'Mayo 1', 'Mayo 2', 'Mayo 3']
 }
 
 # Map folder nama ke label standar MES
@@ -876,16 +883,10 @@ if __name__ == "__main__":
     base_dir = "ColonomindComparasion/Ensemble_Experiment"
     os.makedirs(base_dir, exist_ok=True)
     
-    # 1. Generate Cross-Domain TMC-UCM to NTUH
-    nb_ntuh = build_notebook('Multi', 'TMC-UCM', 'NTUH')
-    out_path_ntuh = os.path.join(base_dir, "ColonoMind_End_to_End_Ensemble_TMC_to_NTUH.ipynb")
-    with open(out_path_ntuh, "w") as f:
-        json.dump(nb_ntuh, f, indent=2)
-    print(f"✅ Generated {out_path_ntuh}")
-
-    # 2. Generate Cross-Domain TMC-UCM to LIMUC
-    nb_limuc = build_notebook('Multi', 'TMC-UCM', 'LIMUC')
-    out_path_limuc = os.path.join(base_dir, "ColonoMind_End_to_End_Ensemble_TMC_to_LIMUC.ipynb")
-    with open(out_path_limuc, "w") as f:
-        json.dump(nb_limuc, f, indent=2)
-    print(f"✅ Generated {out_path_limuc}")
+    # Generate ONE Cross-Domain notebook testing on Combined NTUH + LIMUC
+    nb = build_notebook('Multi', 'TMC-UCM', 'Combined_NTUH_LIMUC')
+    out_path = os.path.join(base_dir, "ColonoMind_End_to_End_Ensemble.ipynb")
+    
+    with open(out_path, "w") as f:
+        json.dump(nb, f, indent=2)
+    print(f"✅ Generated {out_path}")

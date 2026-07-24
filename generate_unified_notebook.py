@@ -51,15 +51,20 @@ It is designed to be run end-to-end to reproduce the results presented in the pa
     cells.append(new_code_cell(
 """import os
 import cv2
+cv2.setNumThreads(0)  # Prevent OpenCV deadlock in multiprocessing
 import numpy as np
 import pywt
 import scipy.stats
-from skimage.feature import graycomatrix, graycoprops
+try:
+    from skimage.feature import graycomatrix, graycoprops
+except ImportError:
+    from skimage.feature import greycomatrix as graycomatrix, greycoprops as graycoprops
 import umap
 import itertools
-import tqdm
+from tqdm import tqdm
 import json
-import joblib
+import joblib as jl
+from joblib import Parallel, delayed
 import pandas as pd
 import matplotlib.pyplot as plt
 from hashlib import sha1
@@ -83,7 +88,8 @@ from tensorflow.keras.utils import to_categorical
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
 
-from sklearn.utils.class_weight import compute_class_weight\nfrom sklearn.model_selection import train_test_split
+from sklearn.utils.class_weight import compute_class_weight
+from sklearn.model_selection import train_test_split
 
 # Limit GPU memory growth
 gpus = tf.config.list_physical_devices('GPU')
@@ -195,7 +201,7 @@ FOLDER_TO_LABEL = {
 """# --- 2. HANDCRAFTED FEATURE EXTRACTORS ---
 def extract_wavelet_stats(image):
     gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-    coeffs2 = pywt.dwt2(gray, WAVELET)
+    coeffs2 = pywt.dwt2(gray, 'db1')
     LL, (LH, HL, HH) = coeffs2
     def stats(subband):
         return [
@@ -219,10 +225,22 @@ def extract_glcm_features(image):
 def extract_combined_features(image):
     return extract_wavelet_stats(image) + extract_glcm_features(image)
 
+def process_single_image(img_path, folder_cls):
+    \"\"\"Process a single image: read, resize, extract features. Used for parallel processing.\"\"\"
+    img = cv2.imread(img_path)
+    if img is None: return None
+    img = cv2.resize(img, IMG_SIZE)
+    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    feats = extract_combined_features(img_rgb)
+    label = FOLDER_TO_LABEL.get(folder_cls, folder_cls)
+    return (img_rgb, feats, label, img_path)
+
 def load_all_images(dir_list, dataset_name):
-    \"\"\"Load all images from a list of directories. Supports per-dataset folder names.\"\"\"
+    \"\"\"Load all images using parallel processing with progress tracking.\"\"\"
     all_imgs, all_feats, all_labels, all_paths = [], [], [], []
     folder_names = DATASET_CLASS_FOLDERS.get(dataset_name, CLASS_NAMES)
+    
+    tasks = []
     for dataset_dir in dir_list:
         for folder_cls in folder_names:
             cls_dir = os.path.join(dataset_dir, folder_cls)
@@ -233,21 +251,24 @@ def load_all_images(dir_list, dataset_name):
                 if any(k in img_name.lower() for k in IGNORE_KEYWORDS):
                     continue
                 img_path = os.path.join(cls_dir, img_name)
-                img = cv2.imread(img_path)
-                if img is None:
-                    continue
-                img = cv2.resize(img, IMG_SIZE)
-                img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-                all_imgs.append(img_rgb)
-                all_feats.append(extract_combined_features(img_rgb))
-                # Selalu gunakan label standar MES
-                all_labels.append(FOLDER_TO_LABEL.get(folder_cls, folder_cls))
-                all_paths.append(img_path)
+                tasks.append((img_path, folder_cls))
+                
+    print(f"  📦 Processing {len(tasks)} images in parallel using all CPU cores...")
+    results = Parallel(n_jobs=-1, batch_size=32, verbose=10)(delayed(process_single_image)(p, c) for p, c in tasks)
+    
+    for r in results:
+        if r is not None:
+            all_imgs.append(r[0])
+            all_feats.append(r[1])
+            all_labels.append(r[2])
+            all_paths.append(r[3])
+            
     return all_imgs, all_feats, all_labels, all_paths
 
 def load_tmc_ucm(tmc_root, split_filter=None):
     \"\"\"
     TMC-UCM: gambar flat di images/, label dari train.txt & test.txt.
+    Uses parallel processing for speed.
     split_filter: None = semua, 'Train' = hanya train.txt, 'Test' = hanya test.txt.
     \"\"\"
     all_imgs, all_feats, all_labels, all_paths = [], [], [], []
@@ -260,6 +281,13 @@ def load_tmc_ucm(tmc_root, split_filter=None):
     if split_filter is None or split_filter == 'Test':
         txt_files.append('test.txt')
 
+    tasks = []
+    
+    # Preload existing files to avoid slow os.path.exists calls on network drives
+    existing_images = set()
+    if os.path.exists(images_dir):
+        existing_images = set(os.listdir(images_dir))
+        
     for txt_file in txt_files:
         fp = os.path.join(tmc_root, txt_file)
         if not os.path.exists(fp):
@@ -275,20 +303,26 @@ def load_tmc_ucm(tmc_root, split_filter=None):
                     label_int = int(parts[1])
                 except ValueError:
                     continue
-                img_path = os.path.join(images_dir, fname)
-                if not os.path.exists(img_path):
+                
+                if fname not in existing_images:
                     continue
+                img_path = os.path.join(images_dir, fname)
                 if any(k in fname.lower() for k in IGNORE_KEYWORDS):
                     continue
-                img = cv2.imread(img_path)
-                if img is None:
-                    continue
-                img = cv2.resize(img, IMG_SIZE)
-                img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-                all_imgs.append(img_rgb)
-                all_feats.append(extract_combined_features(img_rgb))
-                all_labels.append(INT_TO_LABEL.get(label_int, f'MES{label_int}'))
-                all_paths.append(img_path)
+                    
+                folder_cls_str = INT_TO_LABEL.get(label_int, f'MES{label_int}')
+                tasks.append((img_path, folder_cls_str))
+                
+    print(f"  📦 Processing {len(tasks)} TMC-UCM images in parallel...")
+    results = Parallel(n_jobs=-1, batch_size=32, verbose=10)(delayed(process_single_image)(p, c) for p, c in tasks)
+    
+    for r in results:
+        if r is not None:
+            all_imgs.append(r[0])
+            all_feats.append(r[1])
+            all_labels.append(r[2])
+            all_paths.append(r[3])
+            
     return all_imgs, all_feats, all_labels, all_paths
 """
     ))

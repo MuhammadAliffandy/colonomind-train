@@ -63,7 +63,7 @@ import umap
 import itertools
 from tqdm import tqdm
 import json
-import joblib as jl
+import joblib
 from joblib import Parallel, delayed
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -423,9 +423,13 @@ X_train_umap = umap_reducer.fit_transform(X_feat_train_scaled)
 X_val_umap = umap_reducer.transform(X_feat_val_scaled)
 X_test_umap  = umap_reducer.transform(X_feat_test_scaled)
 
-# Save the base scaler and UMAP model
-joblib.dump(scaler, os.path.join(f"{BASE_SAVE_DIR}/UMAP_Experiment", 'base_scaler.pkl'))
-joblib.dump(umap_reducer, os.path.join(f"{BASE_SAVE_DIR}/UMAP_Experiment", 'umap_model.pkl'))
+# Save the base scaler and UMAP model (per-model folder, matching DGX)
+for _mn in ['ResNet-50', 'DenseNet-121', 'EfficientNet-B4', 'ConvNeXt-Tiny', 'ViT-B-16']:
+    _sd = f"{BASE_SAVE_DIR}/{_mn}_Experiment"
+    os.makedirs(_sd, exist_ok=True)
+    joblib.dump(scaler, os.path.join(_sd, 'base_scaler.pkl'))
+    joblib.dump(umap_reducer, os.path.join(_sd, 'umap_model.pkl'))
+print("✅ Saved base_scaler.pkl and umap_model.pkl to all model experiment folders")
 
 plt.figure(figsize=(8,6))
 scatter = plt.scatter(X_train_umap[:,0], X_train_umap[:,1], c=y_train_encoded, cmap='viridis', alpha=0.7)
@@ -532,7 +536,7 @@ history_{model_name.replace('-', '_')} = model_{model_name.replace('-', '_')}.fi
 # Save Hybrid Model Weights
 save_dir = f"{{BASE_SAVE_DIR}}/{model_name}_Experiment"
 os.makedirs(save_dir, exist_ok=True)
-model_path = os.path.join(save_dir, f"{model_name}_hybrid.h5")
+model_path = os.path.join(save_dir, f"{model_name}_hybrid.keras")
 model_{model_name.replace('-', '_')}.save(model_path)
 print(f"✅ Saved {model_name} hybrid weights to {{model_path}}")
 
@@ -554,40 +558,31 @@ plt.show()
         cells.append(new_markdown_cell(f"### 🤖 Super Agent & Hybrid Routing ({model_name})\n"
                                        f"**Update:** This section implements the **One-Shot Training** architecture to eliminate test data leakage. The LightGBM agent is trained *only once* using purely the training set.\n"
                                        f"During evaluation, the system applies a **Confidence Threshold (0.50)** (adjusted for Focal Loss probabilities). Cases where the deep learning model is unsure (< 0.50) are delegated to the Super Agent for the final decision."))
-        cells.append(new_code_cell(f"""# --- 2. SUPER AGENT CONTINUAL LEARNING ({model_name}) ---
-# Generate predictions
-y_pred_proba_test = model_{model_name.replace('-', '_')}.predict(test_inputs, verbose=0)
-y_pred_hybrid_test = np.argmax(y_pred_proba_test, axis=1)
-
+        cells.append(new_code_cell(f"""# --- 2. SUPER AGENT TRAINING ({model_name}) ---
+# Generate predictions on train and test
 y_pred_proba_train = model_{model_name.replace('-', '_')}.predict(train_inputs, verbose=0)
 y_pred_hybrid_train = np.argmax(y_pred_proba_train, axis=1)
 
-# Fit rule-based UMAP DT
-dt = DecisionTreeClassifier(max_depth=5, min_samples_leaf=3, random_state=42)
-dt.fit(X_train_umap, y_train_encoded)
-y_rule_train = dt.predict(X_train_umap)
-y_rule_test = dt.predict(X_test_umap)
+y_pred_proba_test = model_{model_name.replace('-', '_')}.predict(test_inputs, verbose=0)
+y_pred_hybrid_test = np.argmax(y_pred_proba_test, axis=1)
 
-# Construct Feedback DataFrame
-def make_feedback(y_true, y_pred, y_rule, proba, umap_feat, h_feat):
+# Construct feature DataFrame (matching DGX make_features)
+def make_features(proba, umap_feat, h_feat):
     df = pd.DataFrame(h_feat, columns=[f"f{{i}}" for i in range(20)])
     df["confidence"] = np.max(proba, axis=1)
     df["umap_0"] = umap_feat[:, 0]
     df["umap_1"] = umap_feat[:, 1]
-    df["label"] = y_true
-    df["model_pred"] = y_pred
-    df["rule_pred"] = y_rule
     return df
 
-df_train_ag = make_feedback(y_train_encoded, y_pred_hybrid_train, y_rule_train, y_pred_proba_train, X_train_umap, X_feat_train_scaled)
-df_test_ag  = make_feedback(y_test_encoded, y_pred_hybrid_test, y_rule_test, y_pred_proba_test, X_test_umap, X_feat_test_scaled)
-df_test_orig = df_test_ag.copy()
+df_train_ag = make_features(y_pred_proba_train, X_train_umap, X_feat_train_scaled)
+df_test_ag  = make_features(y_pred_proba_test, X_test_umap, X_feat_test_scaled)
 
 features = ["confidence", "umap_0", "umap_1"] + [f"f{{i}}" for i in range(20)]
 
 # Train the Agent ONCE, on TRAIN only (no test leakage)
 print(f"\\n🤖 Training {model_name} LightGBM Super Agent (One-Shot)...")
 scaler_ag = StandardScaler()
+
 # Train Agent ONLY on low confidence training data (Hard Cases)
 conf_train = df_train_ag["confidence"].values
 threshold = 0.50
@@ -605,33 +600,32 @@ else:
 clf = lgb.LGBMClassifier(random_state=42, class_weight='balanced')
 clf.fit(X_tr, y_tr)
 
-# Base deep-model accuracy on test
-base_acc = accuracy_score(y_test_encoded, y_pred_hybrid_test)
-print(f"\\n📊 Base Deep Learning Accuracy (test): {{base_acc:.4f}}")
-
-# Hybrid routing by confidence threshold
-threshold = 0.70
-conf_test = np.max(y_pred_proba_test, axis=1)      # deep model's confidence on test
-low_conf_mask = conf_test < threshold
-
 # Agent prediction on test (features only, never uses test label)
 X_te = scaler_ag.transform(df_test_ag[features].values)
 agent_pred_test = clf.predict(X_te)
+
+# Base deep-model accuracy on test
+base_acc = accuracy_score(y_test_encoded, y_pred_hybrid_test)
+print(f"\\n📊 BASE DEEP LEARNING ACCURACY: {{base_acc:.4f}}  ({{base_acc*100:.2f}}%)")
+
+# Hybrid routing using SAME threshold as agent training (0.50)
+conf_test = np.max(y_pred_proba_test, axis=1)
+low_conf_mask = conf_test < threshold
 
 # High confidence -> deep model; low confidence -> Agent
 final_pred = np.where(low_conf_mask, agent_pred_test, y_pred_hybrid_test)
 hybrid_acc = accuracy_score(y_test_encoded, final_pred)
 
-print(f"⚙️ Hybrid Selector (Threshold = {{threshold}})")
+print(f"⚙️  HYBRID SELECTOR (Threshold = {{threshold}})")
 print(f"🔍 Delegated {{low_conf_mask.sum()}} / {{len(low_conf_mask)}} low-confidence cases to Agent")
-print(f"🏆 Hybrid System Accuracy (test): {{hybrid_acc:.4f}}")
+print(f"🚀 FINAL HYBRID ACCURACY:       {{hybrid_acc:.4f}}  ({{hybrid_acc*100:.2f}}%)")
 
 # Save Super Agent Weights & Scaler
 import shutil
-agent_path = os.path.join(f"{{BASE_SAVE_DIR}}/{model_name}_Experiment", f"{model_name}_agent.txt")
-scaler_path = os.path.join(f"{{BASE_SAVE_DIR}}/{model_name}_Experiment", f"{model_name}_scaler.pkl")
+save_dir_ag = f"{{BASE_SAVE_DIR}}/{model_name}_Experiment"
+agent_path = os.path.join(save_dir_ag, f"{model_name}_agent.txt")
+scaler_path = os.path.join(save_dir_ag, f"{model_name}_scaler.pkl")
 
-# Robust save for LightGBM on Google Drive (avoids FUSE write errors)
 tmp_agent_path = f"/tmp/{model_name}_agent.txt"
 clf.booster_.save_model(tmp_agent_path)
 shutil.copy(tmp_agent_path, agent_path)
@@ -639,10 +633,11 @@ shutil.copy(tmp_agent_path, agent_path)
 joblib.dump(scaler_ag, scaler_path)
 print(f"✅ Saved {model_name} Agent to {{agent_path}}")
 
-# Store all three predictions for separate evaluation
+# Store all predictions for comparison
 all_results['{model_name}'] = {{
     'y_true': y_test_encoded,
     'y_pred_deep': y_pred_hybrid_test,
+    'conf_deep': conf_test,
     'y_pred_agent': agent_pred_test,
     'y_pred_hybrid': final_pred,
     'y_proba': y_pred_proba_test

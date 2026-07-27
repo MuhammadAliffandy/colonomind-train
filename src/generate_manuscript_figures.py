@@ -230,7 +230,7 @@ def main():
     
     # Load Datasets
     print("Loading TMC-UCM Test dataset...")
-    tmc_imgs, tmc_feats, tmc_labels, _ = load_tmc_ucm(f'{args.base_dir}/Dataset/TMC-UCM', txt_files=['test.txt'])
+    tmc_imgs, tmc_feats, tmc_labels, _ = load_tmc_ucm(f'{args.base_dir}/Dataset/TMC-UCM', split_filter='Test')
     
     print("Loading NTUH dataset...")
     ntuh_paths = [f'{args.base_dir}/Dataset+Code/MES classification_20250313', f'{args.base_dir}/Dataset+Code/MES classification_20250724']

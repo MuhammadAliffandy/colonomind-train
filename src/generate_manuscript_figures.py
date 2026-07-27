@@ -174,6 +174,7 @@ def main():
     parser.add_argument("--base_dir", type=str, default="..")
     parser.add_argument("--models_dir", type=str, default="../Result/Intra_TMC-UCM")
     parser.add_argument("--threshold", type=float, default=0.50)
+    parser.add_argument("--only_qwk", action="store_true", help="Only generate QWK Forest Plot (skips ROC and TMC-UCM)")
     args = parser.parse_args()
     
     save_dir = os.path.join(args.base_dir, "Manuscript_Figures")
@@ -235,8 +236,12 @@ def main():
     le.fit(['MES0', 'MES1', 'MES2', 'MES3'])
     
     # Load Datasets
-    print("Loading TMC-UCM Test dataset...")
-    tmc_imgs, tmc_feats, tmc_labels, _ = load_tmc_ucm(f'{args.base_dir}/Dataset/TMC-UCM', split_filter='Test')
+    datasets = {}
+    
+    if not args.only_qwk:
+        print("Loading TMC-UCM Test dataset...")
+        tmc_imgs, tmc_feats, tmc_labels, _ = load_tmc_ucm(f'{args.base_dir}/Dataset/TMC-UCM', split_filter='Test')
+        datasets['TMC-UCM'] = (tmc_imgs, tmc_feats, tmc_labels)
     
     print("Loading NTUH dataset...")
     ntuh_paths = [f'{args.base_dir}/Dataset+Code/MES classification_20250313', f'{args.base_dir}/Dataset+Code/MES classification_20250724']
@@ -246,11 +251,8 @@ def main():
     limuc_paths = [f'{args.base_dir}/Dataset/LIMUC/train_and_validation_sets', f'{args.base_dir}/Dataset/LIMUC/test_set']
     limuc_imgs, limuc_feats, limuc_labels, _ = load_all_images(limuc_paths, 'LIMUC')
     
-    datasets = {
-        'TMC-UCM': (tmc_imgs, tmc_feats, tmc_labels),
-        'NTUH': (ntuh_imgs, ntuh_feats, ntuh_labels),
-        'LIMUC': (limuc_imgs, limuc_feats, limuc_labels)
-    }
+    datasets['NTUH'] = (ntuh_imgs, ntuh_feats, ntuh_labels)
+    datasets['LIMUC'] = (limuc_imgs, limuc_feats, limuc_labels)
     
     forest_data = {}
     
@@ -290,8 +292,9 @@ def main():
             all_hybrid_probas.append(hybrid_proba)
             all_hybrid_preds.append(np.argmax(hybrid_proba, axis=1))
             
-        # Plot ROC for this dataset
-        plot_roc_figure(dataset_name, y_true, model_probas, save_dir)
+        # Plot ROC for this dataset if not only_qwk
+        if not args.only_qwk:
+            plot_roc_figure(dataset_name, y_true, model_probas, save_dir)
         
         # Calculate QWK metrics for Forest Plot (only for NTUH and LIMUC usually, but let's do NTUH and LIMUC specifically as requested)
         if dataset_name in ['NTUH', 'LIMUC']:

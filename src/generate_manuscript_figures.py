@@ -16,6 +16,7 @@ from collections import Counter
 from tqdm import tqdm
 
 from dgx_dataloader import load_all_images, load_tmc_ucm
+import dgx_models  # Import to register all custom keras functions
 
 # Seed for reproducibility
 np.random.seed(42)
@@ -204,7 +205,12 @@ def main():
             'densenet_preprocess': prep,
             'efficientnet_preprocess': prep,
             'convnext_preprocess': prep,
-            'vit_preprocess': prep
+            'vit_preprocess': prep,
+            'Custom>resnet50_preprocess': prep,
+            'Custom>densenet_preprocess': prep,
+            'Custom>efficientnet_preprocess': prep,
+            'Custom>convnext_preprocess': prep,
+            'Custom>vit_preprocess': prep
         }
         
         keras_model = load_model(model_path, compile=False, custom_objects=custom_objs)

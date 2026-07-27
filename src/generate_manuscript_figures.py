@@ -43,7 +43,10 @@ def bootstrap_qwk(y_true, y_pred, n_iterations=1000):
     for i in range(n_iterations):
         indices = np.random.randint(0, n_size, n_size)
         score = cohen_kappa_score(y_true[indices], y_pred[indices], weights='quadratic')
-        scores.append(score)
+        if not np.isnan(score):
+            scores.append(score)
+    if len(scores) == 0:
+        return 0.0, 0.0, 0.0
     scores.sort()
     lower = scores[int(0.025 * len(scores))]
     upper = scores[int(0.975 * len(scores))]
@@ -154,9 +157,12 @@ def draw_forest_plot(forest_data, save_dir):
     ax.set_title('A Adjudication vs best single model — agreement (QWK)', loc='left', fontsize=14, fontweight='bold', pad=20)
     
     # Optional: adjust x-axis limits if needed based on data
-    min_x = min([m - el for m, el in zip(means, errors_lower)]) - 0.05
-    max_x = max([m + eu for m, eu in zip(means, errors_upper)]) + 0.05
-    ax.set_xlim(min_x, max_x)
+    valid_means = [m for m in means if not np.isnan(m)]
+    if valid_means:
+        min_x = min([m - el for m, el in zip(means, errors_lower) if not np.isnan(m)]) - 0.05
+        max_x = max([m + eu for m, eu in zip(means, errors_upper) if not np.isnan(m)]) + 0.05
+        if not np.isnan(min_x) and not np.isnan(max_x):
+            ax.set_xlim(min_x, max_x)
     
     out_path = os.path.join(save_dir, 'Forest_Plot_QWK.png')
     plt.savefig(out_path, bbox_inches='tight', dpi=300)

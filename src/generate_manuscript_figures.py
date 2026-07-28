@@ -238,10 +238,9 @@ def main():
     # Load Datasets
     datasets = {}
     
-    if not args.only_qwk:
-        print("Loading TMC-UCM Test dataset...")
-        tmc_imgs, tmc_feats, tmc_labels, _ = load_tmc_ucm(f'{args.base_dir}/Dataset/TMC-UCM', split_filter='Test')
-        datasets['TMC-UCM'] = (tmc_imgs, tmc_feats, tmc_labels)
+    print("Loading TMC-UCM Test dataset...")
+    tmc_imgs, tmc_feats, tmc_labels, _ = load_tmc_ucm(f'{args.base_dir}/Dataset/TMC-UCM', split_filter='Test')
+    datasets['TMC-UCM'] = (tmc_imgs, tmc_feats, tmc_labels)
     
     print("Loading NTUH dataset...")
     ntuh_paths = [f'{args.base_dir}/Dataset+Code/MES classification_20250313', f'{args.base_dir}/Dataset+Code/MES classification_20250724']
@@ -296,40 +295,39 @@ def main():
         if not args.only_qwk:
             plot_roc_figure(dataset_name, y_true, model_probas, save_dir)
         
-        # Calculate QWK metrics for Forest Plot (only for NTUH and LIMUC usually, but let's do NTUH and LIMUC specifically as requested)
-        if dataset_name in ['NTUH', 'LIMUC']:
-            print(f"Calculating QWK CI via bootstrap for {dataset_name}...")
-            # 1. Best single (find the one with highest QWK)
-            best_qwk = -1
-            best_single_preds = None
-            for preds in all_hybrid_preds:
-                qwk = cohen_kappa_score(y_true, preds, weights='quadratic')
-                if qwk > best_qwk:
-                    best_qwk = qwk
-                    best_single_preds = preds
-            
-            best_mean, best_low, best_high = bootstrap_qwk(y_true, best_single_preds)
-            
-            # 2. Majority Voting (threshold=3)
-            majority_preds = []
-            for i in range(len(y_true)):
-                votes = [preds[i] for preds in all_hybrid_preds]
-                counter = Counter(votes)
-                most_common, count = counter.most_common(1)[0]
-                majority_preds.append(most_common)
-            majority_preds = np.array(majority_preds)
-            maj_mean, maj_low, maj_high = bootstrap_qwk(y_true, majority_preds)
-            
-            # 3. Score-weighted (Soft Voting - average probas)
-            avg_probas = np.mean(all_hybrid_probas, axis=0)
-            score_weighted_preds = np.argmax(avg_probas, axis=1)
-            sw_mean, sw_low, sw_high = bootstrap_qwk(y_true, score_weighted_preds)
-            
-            forest_data[dataset_name] = [
-                {'method': 'Best single', 'mean': best_mean, 'lower': best_low, 'upper': best_high},
-                {'method': 'Majority voting', 'mean': maj_mean, 'lower': maj_low, 'upper': maj_high},
-                {'method': 'Score-weighted', 'mean': sw_mean, 'lower': sw_low, 'upper': sw_high}
-            ]
+        # Calculate QWK metrics for Forest Plot
+        print(f"Calculating QWK CI via bootstrap for {dataset_name}...")
+        # 1. Best single (find the one with highest QWK)
+        best_qwk = -1
+        best_single_preds = None
+        for preds in all_hybrid_preds:
+            qwk = cohen_kappa_score(y_true, preds, weights='quadratic')
+            if qwk > best_qwk:
+                best_qwk = qwk
+                best_single_preds = preds
+        
+        best_mean, best_low, best_high = bootstrap_qwk(y_true, best_single_preds)
+        
+        # 2. Majority Voting (threshold=3)
+        majority_preds = []
+        for i in range(len(y_true)):
+            votes = [preds[i] for preds in all_hybrid_preds]
+            counter = Counter(votes)
+            most_common, count = counter.most_common(1)[0]
+            majority_preds.append(most_common)
+        majority_preds = np.array(majority_preds)
+        maj_mean, maj_low, maj_high = bootstrap_qwk(y_true, majority_preds)
+        
+        # 3. Score-weighted (Soft Voting - average probas)
+        avg_probas = np.mean(all_hybrid_probas, axis=0)
+        score_weighted_preds = np.argmax(avg_probas, axis=1)
+        sw_mean, sw_low, sw_high = bootstrap_qwk(y_true, score_weighted_preds)
+        
+        forest_data[dataset_name] = [
+            {'method': 'Best single', 'mean': best_mean, 'lower': best_low, 'upper': best_high},
+            {'method': 'Majority voting', 'mean': maj_mean, 'lower': maj_low, 'upper': maj_high},
+            {'method': 'Score-weighted', 'mean': sw_mean, 'lower': sw_low, 'upper': sw_high}
+        ]
             
     # Generate Forest Plot
     draw_forest_plot(forest_data, save_dir)

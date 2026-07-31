@@ -19,6 +19,7 @@ warnings.filterwarnings('ignore')
 
 from dgx_dataloader import load_all_images, load_tmc_ucm
 import tensorflow_hub as hub
+import dgx_models  # For custom keras functions
 
 np.random.seed(42)
 

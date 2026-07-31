@@ -18,7 +18,7 @@ import warnings
 warnings.filterwarnings('ignore')
 
 from dgx_dataloader import load_all_images, load_tmc_ucm
-import dgx_models  # For custom keras functions
+import tensorflow_hub as hub
 
 np.random.seed(42)
 
@@ -152,11 +152,45 @@ def main():
     
     print("Loading models and agents...")
     for model_name in model_names:
-        models[model_name] = load_model(os.path.join(args.models_dir, f'{model_name}_best.h5'), custom_objects=dgx_models.get_custom_objects())
-        scaler = joblib.load(os.path.join(args.models_dir, f'{model_name}_scaler.pkl'))
-        scalers[model_name] = scaler
-        agent_booster = lgb.Booster(model_file=os.path.join(args.models_dir, f'{model_name}_agent.txt'))
-        agents[model_name] = LGBMWrapper(agent_booster)
+        exp_dir = os.path.join(args.models_dir, f"{model_name}_Experiment")
+        model_path = os.path.join(exp_dir, f"{model_name}_hybrid.keras")
+        if not os.path.exists(model_path):
+            model_path = os.path.join(exp_dir, f"{model_name}_hybrid.h5")
+            
+        if model_name == 'ResNet-50':
+            from tensorflow.keras.applications.resnet50 import preprocess_input as prep
+        elif model_name == 'DenseNet-121':
+            from tensorflow.keras.applications.densenet import preprocess_input as prep
+        elif model_name == 'EfficientNet-B4':
+            from tensorflow.keras.applications.efficientnet import preprocess_input as prep
+        elif model_name == 'ConvNeXt-Tiny':
+            from tensorflow.keras.applications.convnext import preprocess_input as prep
+        else:
+            prep = lambda img: (img / 127.5) - 1.0
+
+        custom_objs = {
+            'KerasLayer': hub.KerasLayer,
+            'preprocess_input': prep,
+            '<lambda>': prep,
+            'resnet50_preprocess': prep,
+            'densenet_preprocess': prep,
+            'efficientnet_preprocess': prep,
+            'convnext_preprocess': prep,
+            'vit_preprocess': prep,
+            'Custom>resnet50_preprocess': prep,
+            'Custom>densenet_preprocess': prep,
+            'Custom>efficientnet_preprocess': prep,
+            'Custom>convnext_preprocess': prep,
+            'Custom>vit_preprocess': prep
+        }
+        
+        keras_model = load_model(model_path, compile=False, custom_objects=custom_objs)
+        scaler_ag = joblib.load(os.path.join(exp_dir, f"{model_name}_scaler.pkl"))
+        agent_model = lgb.Booster(model_file=os.path.join(exp_dir, f"{model_name}_agent.txt"))
+        
+        models[model_name] = keras_model
+        scalers[model_name] = scaler_ag
+        agents[model_name] = LGBMWrapper(agent_model)
         
     le = LabelEncoder()
     le.fit(['MES0', 'MES1', 'MES2', 'MES3'])

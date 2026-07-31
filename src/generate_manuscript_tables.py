@@ -196,6 +196,10 @@ def main():
     le = LabelEncoder()
     le.fit(['MES0', 'MES1', 'MES2', 'MES3'])
     
+    # Global UMAP and Scaler for feature extraction
+    global_umap = joblib.load(os.path.join(args.models_dir, "ResNet-50_Experiment", "umap_model.pkl"))
+    global_scaler = joblib.load(os.path.join(args.models_dir, "ResNet-50_Experiment", "base_scaler.pkl"))
+    
     datasets = {}
     print("Loading TMC-UCM Test dataset...")
     tmc_imgs, tmc_feats, tmc_labels, _ = load_tmc_ucm(f'{args.base_dir}/Dataset/TMC-UCM', split_filter='Test')
@@ -221,16 +225,28 @@ def main():
 
     for dataset_name, (imgs, feats, labels) in datasets.items():
         print(f"\\nProcessing {dataset_name} for Tables & Figures...")
+        X_img = np.array(imgs, dtype=np.float32)
+        X_feat = np.array(feats)
         y_true = le.transform(labels)
+        
+        X_feat_scaled = global_scaler.transform(X_feat)
+        X_umap = global_umap.transform(X_feat_scaled)
         
         all_hybrid_probas = []
         all_hybrid_preds = []
         
         for model_name in model_names:
             print(f"  Running inference for {model_name}...")
-            deep_proba = models[model_name].predict(imgs, batch_size=32, verbose=0)
-            X_feats = scalers[model_name].transform(feats)
-            agent_proba = agents[model_name].predict_proba(X_feats)
+            keras_model = models[model_name]
+            agent_wrapper = agents[model_name]
+            scaler_ag = scalers[model_name]
+            
+            deep_proba = keras_model.predict([X_img, X_feat_scaled, X_umap], verbose=0)
+            
+            df = pd.DataFrame(X_feat_scaled, columns=[f"f{i}" for i in range(20)])
+            df['umap_1'] = X_umap[:, 0]
+            df['umap_2'] = X_umap[:, 1]
+            agent_proba = agent_wrapper.predict_proba(df)
             
             hybrid_proba = get_hybrid_proba(deep_proba, agent_proba, args.threshold)
             hybrid_preds = np.argmax(hybrid_proba, axis=1)

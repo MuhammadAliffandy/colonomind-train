@@ -1,0 +1,219 @@
+def bootstrap_metric(y_true, y_pred, metric_func, n_iterations=1000):
+    scores = []
+    n_size = int(len(y_true))
+    for i in range(n_iterations):
+        indices = np.random.randint(0, n_size, n_size)
+        try:
+            score = metric_func(y_true[indices], y_pred[indices])
+            if not np.isnan(score):
+                scores.append(score)
+        except:
+            continue
+    if len(scores) == 0:
+        return 0.0, 0.0, 0.0
+    scores.sort()
+    lower = scores[int(0.025 * len(scores))]
+    upper = scores[int(0.975 * len(scores))]
+    mean_score = np.mean(scores)
+    return mean_score, lower, upper
+
+def draw_confusion_matrix(y_true, y_pred, dataset_name, save_dir):
+    cm = confusion_matrix(y_true, y_pred)
+    plt.figure(figsize=(8, 6))
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
+                xticklabels=['MES 0', 'MES 1', 'MES 2', 'MES 3'],
+                yticklabels=['MES 0', 'MES 1', 'MES 2', 'MES 3'])
+    plt.xlabel('Predicted Label', fontsize=12)
+    plt.ylabel('True Label', fontsize=12)
+    plt.title(f'Confusion Matrix - {dataset_name} (Score-weighted)', fontsize=14)
+    out_path = os.path.join(save_dir, f'Fig_CM_{dataset_name}.png')
+    plt.savefig(out_path, bbox_inches='tight', dpi=300)
+    plt.close()
+    print(f"✅ Saved {out_path}")
+
+def draw_table6_plot(table6_data, save_dir):
+    # Plotting for Table 6: classes detected successfully at different agreement thresholds
+    # table6_data format: list of dicts: [{'Dataset': d, 'Threshold': t, 'Class': c, 'Accuracy': acc}, ...]
+    df = pd.DataFrame(table6_data)
+    if len(df) == 0:
+        return
+        
+    g = sns.catplot(data=df, x='Accuracy', y='Class', hue='Threshold', col='Dataset', 
+                    kind='bar', height=5, aspect=1.2, palette='Set2')
+    
+    # Add a baseline/target line (e.g., 80% accuracy threshold for "successful detection")
+    target_accuracy = 0.80
+    for ax in g.axes.flat:
+        ax.axvline(target_accuracy, color='r', linestyle='--', label=f'Target ({target_accuracy*100}%)')
+        ax.set_xlim(0, 1.05)
+    
+    plt.suptitle("Statistical Analysis for Model Agreement", y=1.05, fontsize=16)
+    out_path = os.path.join(save_dir, 'Fig_4_Agreement_Stats.png')
+    plt.savefig(out_path, bbox_inches='tight', dpi=300)
+    plt.close()
+    print(f"✅ Saved {out_path}")
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--base_dir", type=str, default="..")
+    parser.add_argument("--models_dir", type=str, default="../Result/Intra_TMC-UCM")
+    parser.add_argument("--threshold", type=float, default=0.50)
+    args = parser.parse_args()
+    
+    save_dir = os.path.join(args.base_dir, "Manuscript_Results")
+    os.makedirs(save_dir, exist_ok=True)
+    
+    model_names = ['ResNet-50', 'DenseNet-121', 'EfficientNet-B4', 'ConvNeXt-Tiny', 'ViT-B-16']
+    
+    models = {}
+    scalers = {}
+    agents = {}
+    
+    print("Loading models and agents...")
+    for model_name in model_names:
+        models[model_name] = load_model(os.path.join(args.models_dir, f'{model_name}_best.h5'), custom_objects=dgx_models.get_custom_objects())
+        scaler = joblib.load(os.path.join(args.models_dir, f'{model_name}_scaler.pkl'))
+        scalers[model_name] = scaler
+        agent_booster = lgb.Booster(model_file=os.path.join(args.models_dir, f'{model_name}_agent.txt'))
+        agents[model_name] = LGBMWrapper(agent_booster)
+        
+    le = LabelEncoder()
+    le.fit(['MES0', 'MES1', 'MES2', 'MES3'])
+    
+    datasets = {}
+    print("Loading TMC-UCM Test dataset...")
+    tmc_imgs, tmc_feats, tmc_labels, _ = load_tmc_ucm(f'{args.base_dir}/Dataset/TMC-UCM', split_filter='Test')
+    datasets['TMC-UCM'] = (tmc_imgs, tmc_feats, tmc_labels)
+    
+    print("Loading NTUH dataset...")
+    ntuh_paths = [f'{args.base_dir}/Dataset+Code/MES classification_20250313', f'{args.base_dir}/Dataset+Code/MES classification_20250724']
+    ntuh_imgs, ntuh_feats, ntuh_labels, _ = load_all_images(ntuh_paths, 'NTUH')
+    datasets['NTUH'] = (ntuh_imgs, ntuh_feats, ntuh_labels)
+    
+    print("Loading LIMUC dataset...")
+    limuc_paths = [f'{args.base_dir}/Dataset/LIMUC/train_and_validation_sets', f'{args.base_dir}/Dataset/LIMUC/test_set']
+    limuc_imgs, limuc_feats, limuc_labels, _ = load_all_images(limuc_paths, 'LIMUC')
+    datasets['LIMUC'] = (limuc_imgs, limuc_feats, limuc_labels)
+    
+    # Initialize DataFrames for Tables
+    table1_rows = []
+    table2_rows = []
+    table3_rows = [] # NTUH
+    table4_rows = [] # LIMUC
+    table5_rows = [] # TMC-UCM
+    table6_data = [] # Agreement
+
+    for dataset_name, (imgs, feats, labels) in datasets.items():
+        print(f"\\nProcessing {dataset_name} for Tables & Figures...")
+        y_true = le.transform(labels)
+        
+        all_hybrid_probas = []
+        all_hybrid_preds = []
+        
+        for model_name in model_names:
+            print(f"  Running inference for {model_name}...")
+            deep_proba = models[model_name].predict(imgs, batch_size=32, verbose=0)
+            X_feats = scalers[model_name].transform(feats)
+            agent_proba = agents[model_name].predict_proba(X_feats)
+            
+            hybrid_proba = get_hybrid_proba(deep_proba, agent_proba, args.threshold)
+            hybrid_preds = np.argmax(hybrid_proba, axis=1)
+            
+            all_hybrid_probas.append(hybrid_proba)
+            all_hybrid_preds.append(hybrid_preds)
+            
+            # --- Table 1: Primary Outcome Average (Acc, QWK) ---
+            acc_func = lambda yt, yp: accuracy_score(yt, yp)
+            acc_mean, acc_low, acc_high = bootstrap_metric(y_true, hybrid_preds, acc_func)
+            
+            qwk_func = lambda yt, yp: cohen_kappa_score(yt, yp, weights='quadratic')
+            qwk_mean, qwk_low, qwk_high = bootstrap_metric(y_true, hybrid_preds, qwk_func)
+            
+            table1_rows.append({
+                'Dataset': dataset_name,
+                'Model': model_name,
+                'Accuracy (95% CI)': f"{acc_mean:.3f} ({acc_low:.3f}-{acc_high:.3f})",
+                'QWK (95% CI)': f"{qwk_mean:.3f} ({qwk_low:.3f}-{qwk_high:.3f})"
+            })
+            
+            # --- Table 2: Primary Outcome Per Class (Acc) ---
+            for cls_idx, cls_name in enumerate(['MES 0', 'MES 1', 'MES 2', 'MES 3']):
+                cls_mask = y_true == cls_idx
+                if np.sum(cls_mask) > 0:
+                    acc_cls_func = lambda yt, yp: accuracy_score(yt, yp)
+                    acc_cls_mean, acc_cls_low, acc_cls_high = bootstrap_metric(y_true[cls_mask], hybrid_preds[cls_mask], acc_cls_func)
+                    
+                    table2_rows.append({
+                        'Dataset': dataset_name,
+                        'Model': model_name,
+                        'Class': cls_name,
+                        'Accuracy (95% CI)': f"{acc_cls_mean:.3f} ({acc_cls_low:.3f}-{acc_cls_high:.3f})"
+                    })
+                    
+            # --- Table 3, 4, 5: Secondary Outcomes (Sens, Spec, PPV, NPV, F1, ECE) ---
+            sec_metrics = calc_secondary_metrics(y_true, hybrid_preds)
+            ece_val = calc_ece(y_true, hybrid_proba)
+            
+            for cls_idx, cls_name in enumerate(['MES 0', 'MES 1', 'MES 2', 'MES 3']):
+                row = {
+                    'Model': model_name,
+                    'Class': cls_name,
+                    'Sensitivity': f"{sec_metrics[cls_idx]['Sensitivity']:.3f}",
+                    'Specificity': f"{sec_metrics[cls_idx]['Specificity']:.3f}",
+                    'PPV': f"{sec_metrics[cls_idx]['PPV']:.3f}",
+                    'NPV': f"{sec_metrics[cls_idx]['NPV']:.3f}",
+                    'F1 Score': f"{sec_metrics[cls_idx]['F1']:.3f}",
+                    'ECE': f"{ece_val:.3f}"
+                }
+                if dataset_name == 'NTUH':
+                    table3_rows.append(row)
+                elif dataset_name == 'LIMUC':
+                    table4_rows.append(row)
+                elif dataset_name == 'TMC-UCM':
+                    table5_rows.append(row)
+        # --- Table 6: Model Agreement Thresholds (3/5, 4/5, 5/5) ---
+        all_hybrid_preds_arr = np.array(all_hybrid_preds) # shape: (5, N)
+        for cls_idx, cls_name in enumerate(['MES 0', 'MES 1', 'MES 2', 'MES 3']):
+            cls_mask = y_true == cls_idx
+            if np.sum(cls_mask) > 0:
+                y_true_cls = y_true[cls_mask]
+                preds_cls = all_hybrid_preds_arr[:, cls_mask] # shape: (5, N_cls)
+                
+                # Check agreement: sum of correctly predicting models for each instance
+                correct_votes = np.sum(preds_cls == cls_idx, axis=0) # shape: (N_cls,)
+                
+                for thresh, thresh_name in zip([3, 4, 5], ['3/5', '4/5', '5/5']):
+                    successful_detects = np.sum(correct_votes >= thresh)
+                    total_instances = len(y_true_cls)
+                    accuracy = successful_detects / total_instances
+                    
+                    table6_data.append({
+                        'Dataset': dataset_name,
+                        'Class': cls_name,
+                        'Threshold': thresh_name,
+                        'Successful_Detects': successful_detects,
+                        'Total_Instances': total_instances,
+                        'Accuracy': accuracy
+                    })
+        
+        # --- Figure 1, 2, 3: Confusion Matrix (Score-weighted ensemble) ---
+        avg_probas = np.mean(all_hybrid_probas, axis=0)
+        sw_preds = np.argmax(avg_probas, axis=1)
+        draw_confusion_matrix(y_true, sw_preds, dataset_name, save_dir)
+        
+    print("\\nSaving all tables to CSV...")
+    pd.DataFrame(table1_rows).to_csv(os.path.join(save_dir, 'Table_1_Primary_Average.csv'), index=False)
+    pd.DataFrame(table2_rows).to_csv(os.path.join(save_dir, 'Table_2_Primary_PerClass.csv'), index=False)
+    pd.DataFrame(table3_rows).to_csv(os.path.join(save_dir, 'Table_3_Secondary_NTUH.csv'), index=False)
+    pd.DataFrame(table4_rows).to_csv(os.path.join(save_dir, 'Table_4_Secondary_LIMUC.csv'), index=False)
+    pd.DataFrame(table5_rows).to_csv(os.path.join(save_dir, 'Table_5_Secondary_TMC-UCM.csv'), index=False)
+    
+    df_t6 = pd.DataFrame(table6_data)
+    df_t6.to_csv(os.path.join(save_dir, 'Table_6_Agreement_Thresholds.csv'), index=False)
+    
+    print("Generating Figure 4 (Statistical Analysis for Table 6)...")
+    draw_table6_plot(table6_data, save_dir)
+    
+    print("\\n✅ All 6 Tables and 4 Figures generated successfully in Manuscript_Results!")
+
+if __name__ == "__main__":
+    main()

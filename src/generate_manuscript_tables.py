@@ -1,3 +1,84 @@
+import os
+import argparse
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+import joblib
+from sklearn.metrics import confusion_matrix, accuracy_score, cohen_kappa_score, f1_score
+from sklearn.preprocessing import LabelEncoder
+from collections import Counter
+from tqdm import tqdm
+from tensorflow.keras.models import load_model
+from tensorflow.keras.utils import to_categorical
+import tensorflow as tf
+import lightgbm as lgb
+import warnings
+
+warnings.filterwarnings('ignore')
+
+from dgx_dataloader import load_all_images, load_tmc_ucm
+import dgx_models  # For custom keras functions
+
+np.random.seed(42)
+
+# --- Helper Classes and Functions ---
+class LGBMWrapper:
+    def __init__(self, booster):
+        self.booster = booster
+    def predict_proba(self, X):
+        return self.booster.predict(X)
+
+def get_hybrid_proba(deep_proba, agent_proba, threshold=0.50):
+    final_proba = deep_proba.copy()
+    conf = np.max(deep_proba, axis=1)
+    low_conf = conf < threshold
+    final_proba[low_conf] = agent_proba[low_conf]
+    return final_proba
+
+def calc_ece(y_true, y_proba, n_bins=10):
+    bin_boundaries = np.linspace(0, 1, n_bins + 1)
+    bin_lowers = bin_boundaries[:-1]
+    bin_uppers = bin_boundaries[1:]
+    
+    confidences = np.max(y_proba, axis=1)
+    predictions = np.argmax(y_proba, axis=1)
+    accuracies = predictions == y_true
+    
+    ece = np.zeros(1)
+    for bin_lower, bin_upper in zip(bin_lowers, bin_uppers):
+        in_bin = (confidences > bin_lower) & (confidences <= bin_upper)
+        prop_in_bin = in_bin.astype(float).mean()
+        if prop_in_bin > 0:
+            accuracy_in_bin = accuracies[in_bin].astype(float).mean()
+            avg_confidence_in_bin = confidences[in_bin].mean()
+            ece += np.abs(avg_confidence_in_bin - accuracy_in_bin) * prop_in_bin
+    return ece[0]
+
+def calc_secondary_metrics(y_true, y_pred, num_classes=4):
+    cm = confusion_matrix(y_true, y_pred, labels=range(num_classes))
+    metrics = {}
+    for i in range(num_classes):
+        tp = cm[i, i]
+        fn = np.sum(cm[i, :]) - tp
+        fp = np.sum(cm[:, i]) - tp
+        tn = np.sum(cm) - (tp + fp + fn)
+        
+        sens = tp / (tp + fn) if (tp + fn) > 0 else 0
+        spec = tn / (tn + fp) if (tn + fp) > 0 else 0
+        ppv = tp / (tp + fp) if (tp + fp) > 0 else 0
+        npv = tn / (tn + fn) if (tn + fn) > 0 else 0
+        f1 = 2 * (ppv * sens) / (ppv + sens) if (ppv + sens) > 0 else 0
+        
+        metrics[i] = {
+            'Sensitivity': sens,
+            'Specificity': spec,
+            'PPV': ppv,
+            'NPV': npv,
+            'F1': f1
+        }
+    return metrics
+
 def bootstrap_metric(y_true, y_pred, metric_func, n_iterations=1000):
     scores = []
     n_size = int(len(y_true))
@@ -52,6 +133,7 @@ def draw_table6_plot(table6_data, save_dir):
     plt.savefig(out_path, bbox_inches='tight', dpi=300)
     plt.close()
     print(f"✅ Saved {out_path}")
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--base_dir", type=str, default="..")
@@ -170,6 +252,7 @@ def main():
                     table4_rows.append(row)
                 elif dataset_name == 'TMC-UCM':
                     table5_rows.append(row)
+        
         # --- Table 6: Model Agreement Thresholds (3/5, 4/5, 5/5) ---
         all_hybrid_preds_arr = np.array(all_hybrid_preds) # shape: (5, N)
         for cls_idx, cls_name in enumerate(['MES 0', 'MES 1', 'MES 2', 'MES 3']):

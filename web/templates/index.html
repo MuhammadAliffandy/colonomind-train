@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Colonomind Manuscript Results Dashboard — Interactive visualization of hybrid deep learning model evaluation for Mayo Endoscopic Score classification.">
+    <title>Colonomind — Manuscript Results Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔬</text></svg>">
+</head>
+<body>
+
+<!-- ── Header ── -->
+<header class="header">
+    <div class="header-inner">
+        <div class="header-brand">
+            <div class="header-logo">C</div>
+            <div>
+                <h1>Colonomind Manuscript Results</h1>
+                <div class="header-subtitle">Hybrid Deep Learning × LightGBM Agent — MES Classification</div>
+            </div>
+        </div>
+        {% if status == 'ready' %}
+        <div class="header-badge">Results Ready</div>
+        {% else %}
+        <div class="header-badge" style="background: rgba(245, 158, 11, 0.15); border-color: rgba(245, 158, 11, 0.3); color: #f59e0b;">
+            Awaiting Results
+        </div>
+        {% endif %}
+    </div>
+</header>
+
+<!-- ── Stats Bar ── -->
+<div class="stats-bar">
+    <div class="stat-card">
+        <div class="stat-label">Models</div>
+        <div class="stat-value">5</div>
+        <div class="stat-detail">ResNet · DenseNet · EfficientNet · ConvNeXt · ViT</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Datasets</div>
+        <div class="stat-value">3</div>
+        <div class="stat-detail">TMC-UCM · NTUH · LIMUC</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">MES Classes</div>
+        <div class="stat-value">4</div>
+        <div class="stat-detail">MES 0 · MES 1 · MES 2 · MES 3</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Tables & Figures</div>
+        <div class="stat-value">{{ table_count + figure_count }}</div>
+        <div class="stat-detail">{{ table_count }} Tables · {{ figure_count }} Figures</div>
+    </div>
+</div>
+
+<!-- ── Tab Navigation ── -->
+<nav class="tab-nav" id="tabNav">
+    <button class="tab-btn active" data-tab="tables" id="tab-btn-tables">📊 Tables (1–6)</button>
+    <button class="tab-btn" data-tab="confusion" id="tab-btn-confusion">🔢 Confusion Matrices</button>
+    <button class="tab-btn" data-tab="agreement" id="tab-btn-agreement">📈 Agreement Analysis</button>
+    <button class="tab-btn" data-tab="forest" id="tab-btn-forest">🌲 Forest Plot</button>
+</nav>
+
+<!-- ── Content ── -->
+<main class="content">
+
+    <!-- ═══ TAB: Tables ═══ -->
+    <div class="tab-panel active" id="panel-tables">
+
+        <!-- Table 1 -->
+        <div class="section-card">
+            <div class="section-title"><span class="icon">📋</span> Table 1 — Primary Outcome Average</div>
+            <div class="section-desc">Overall Accuracy (95% CI) and Quadratic Weighted Kappa (QWK) for each model across all three datasets.</div>
+            {% if tables.table1 %}
+            <div class="table-wrapper">
+                {{ tables.table1 | safe }}
+            </div>
+            {% else %}
+            <div class="empty-state">
+                <div class="icon">📭</div>
+                <h3>No data yet</h3>
+                <p>Run <code>generate_manuscript_tables.py</code> on DGX first to generate this table.</p>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Table 2 -->
+        <div class="section-card">
+            <div class="section-title"><span class="icon">📋</span> Table 2 — Primary Outcome Per Class</div>
+            <div class="section-desc">Per-class accuracy (95% CI) for MES 0–3 across each model and dataset.</div>
+            {% if tables.table2 %}
+            <div class="table-wrapper">
+                {{ tables.table2 | safe }}
+            </div>
+            {% else %}
+            <div class="empty-state">
+                <div class="icon">📭</div>
+                <h3>No data yet</h3>
+                <p>Run <code>generate_manuscript_tables.py</code> on DGX first.</p>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Table 3 -->
+        <div class="section-card">
+            <div class="section-title"><span class="icon">📋</span> Table 3 — Secondary Outcome: NTUH</div>
+            <div class="section-desc">Sensitivity, Specificity, PPV, NPV, F1 Score, and ECE for each model per MES class on the NTUH dataset.</div>
+            {% if tables.table3 %}
+            <div class="table-wrapper">
+                {{ tables.table3 | safe }}
+            </div>
+            {% else %}
+            <div class="empty-state">
+                <div class="icon">📭</div>
+                <h3>No data yet</h3>
+                <p>Run <code>generate_manuscript_tables.py</code> on DGX first.</p>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Table 4 -->
+        <div class="section-card">
+            <div class="section-title"><span class="icon">📋</span> Table 4 — Secondary Outcome: LIMUC</div>
+            <div class="section-desc">Sensitivity, Specificity, PPV, NPV, F1 Score, and ECE for each model per MES class on the LIMUC dataset.</div>
+            {% if tables.table4 %}
+            <div class="table-wrapper">
+                {{ tables.table4 | safe }}
+            </div>
+            {% else %}
+            <div class="empty-state">
+                <div class="icon">📭</div>
+                <h3>No data yet</h3>
+                <p>Run <code>generate_manuscript_tables.py</code> on DGX first.</p>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Table 5 -->
+        <div class="section-card">
+            <div class="section-title"><span class="icon">📋</span> Table 5 — Secondary Outcome: TMC-UCM</div>
+            <div class="section-desc">Sensitivity, Specificity, PPV, NPV, F1 Score, and ECE for each model per MES class on the TMC-UCM dataset.</div>
+            {% if tables.table5 %}
+            <div class="table-wrapper">
+                {{ tables.table5 | safe }}
+            </div>
+            {% else %}
+            <div class="empty-state">
+                <div class="icon">📭</div>
+                <h3>No data yet</h3>
+                <p>Run <code>generate_manuscript_tables.py</code> on DGX first.</p>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Table 6 -->
+        <div class="section-card">
+            <div class="section-title"><span class="icon">📋</span> Table 6 — Model Agreement Thresholds</div>
+            <div class="section-desc">Number of classes successfully detected when agreement threshold is set to 3/5, 4/5, and 5/5 model consensus.</div>
+            {% if tables.table6 %}
+            <div class="table-wrapper">
+                {{ tables.table6 | safe }}
+            </div>
+            {% else %}
+            <div class="empty-state">
+                <div class="icon">📭</div>
+                <h3>No data yet</h3>
+                <p>Run <code>generate_manuscript_tables.py</code> on DGX first.</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- ═══ TAB: Confusion Matrices ═══ -->
+    <div class="tab-panel" id="panel-confusion">
+        <div class="section-card">
+            <div class="section-title"><span class="icon">🔢</span> Confusion Matrices — Score-Weighted Ensemble</div>
+            <div class="section-desc">Confusion matrices showing True vs Predicted labels for MES 0–3 using score-weighted ensemble averaging across all 5 hybrid models.</div>
+            
+            {% if figures.cm | length > 0 %}
+            <div class="figures-grid">
+                {% for fig in figures.cm %}
+                <div class="figure-card">
+                    <img src="{{ url_for('serve_figure', filename=fig.filename) }}" alt="{{ fig.title }}" onclick="openLightbox(this)">
+                    <div class="figure-caption">
+                        <h3>{{ fig.title }}</h3>
+                        <p>{{ fig.desc }}</p>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="empty-state">
+                <div class="icon">🖼️</div>
+                <h3>No confusion matrices found</h3>
+                <p>Run <code>generate_manuscript_tables.py</code> on DGX first to generate these figures.</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- ═══ TAB: Agreement Analysis ═══ -->
+    <div class="tab-panel" id="panel-agreement">
+        <div class="section-card">
+            <div class="section-title"><span class="icon">📈</span> Statistical Analysis — Model Agreement</div>
+            <div class="section-desc">Bar chart comparing per-class detection accuracy at 3/5, 4/5, and 5/5 agreement thresholds with a red dashed line at 80% target.</div>
+            
+            {% if figures.agreement %}
+            <div class="figures-grid" style="grid-template-columns: 1fr;">
+                <div class="figure-card">
+                    <img src="{{ url_for('serve_figure', filename=figures.agreement.filename) }}" alt="Agreement Analysis" onclick="openLightbox(this)">
+                    <div class="figure-caption">
+                        <h3>{{ figures.agreement.title }}</h3>
+                        <p>{{ figures.agreement.desc }}</p>
+                    </div>
+                </div>
+            </div>
+            {% else %}
+            <div class="empty-state">
+                <div class="icon">📊</div>
+                <h3>No agreement plot found</h3>
+                <p>Run <code>generate_manuscript_tables.py</code> on DGX first.</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- ═══ TAB: Forest Plot ═══ -->
+    <div class="tab-panel" id="panel-forest">
+        <div class="section-card">
+            <div class="section-title"><span class="icon">🌲</span> Forest Plot — QWK Comparison</div>
+            <div class="section-desc">Forest plot comparing Quadratic Weighted Kappa (QWK) with 95% confidence intervals across all models and datasets.</div>
+            
+            {% if figures.forest %}
+            <div class="figures-grid" style="grid-template-columns: 1fr;">
+                <div class="figure-card">
+                    <img src="{{ url_for('serve_figure_ext', folder='Manuscript_Figures', filename=figures.forest.filename) }}" alt="Forest Plot QWK" onclick="openLightbox(this)">
+                    <div class="figure-caption">
+                        <h3>{{ figures.forest.title }}</h3>
+                        <p>{{ figures.forest.desc }}</p>
+                    </div>
+                </div>
+            </div>
+            {% else %}
+            <div class="empty-state">
+                <div class="icon">🌲</div>
+                <h3>No forest plot found</h3>
+                <p>Run <code>generate_manuscript_figures.py --only_qwk</code> on DGX first.</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+</main>
+
+<!-- ── Lightbox ── -->
+<div class="lightbox" id="lightbox" onclick="closeLightbox()">
+    <img id="lightbox-img" src="" alt="Zoomed figure">
+</div>
+
+<script>
+    // Tab switching
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+            btn.classList.add('active');
+            document.getElementById('panel-' + btn.dataset.tab).classList.add('active');
+        });
+    });
+
+    // Lightbox
+    function openLightbox(imgEl) {
+        const lb = document.getElementById('lightbox');
+        document.getElementById('lightbox-img').src = imgEl.src;
+        lb.classList.add('active');
+    }
+    function closeLightbox() {
+        document.getElementById('lightbox').classList.remove('active');
+    }
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeLightbox(); });
+
+    // Add dataset tag styling to table cells
+    document.querySelectorAll('.data-table td').forEach(td => {
+        const text = td.textContent.trim();
+        if (text === 'TMC-UCM') td.innerHTML = '<span class="dataset-tag tmc">TMC-UCM</span>';
+        else if (text === 'NTUH') td.innerHTML = '<span class="dataset-tag ntuh">NTUH</span>';
+        else if (text === 'LIMUC') td.innerHTML = '<span class="dataset-tag limuc">LIMUC</span>';
+    });
+</script>
+</body>
+</html>

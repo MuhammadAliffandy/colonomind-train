@@ -244,9 +244,12 @@ def main():
             deep_proba = keras_model.predict([X_img, X_feat_scaled, X_umap], verbose=0)
             
             df = pd.DataFrame(X_feat_scaled, columns=[f"f{i}" for i in range(20)])
-            df['umap_1'] = X_umap[:, 0]
-            df['umap_2'] = X_umap[:, 1]
-            agent_proba = agent_wrapper.predict_proba(df)
+            df["confidence"] = np.max(deep_proba, axis=1)
+            df["umap_0"] = X_umap[:, 0]
+            df["umap_1"] = X_umap[:, 1]
+            features = ["confidence", "umap_0", "umap_1"] + [f"f{i}" for i in range(20)]
+            X_ag = scaler_ag.transform(df[features].values)
+            agent_proba = agent_wrapper.predict_proba(X_ag)
             
             hybrid_proba = get_hybrid_proba(deep_proba, agent_proba, args.threshold)
             hybrid_preds = np.argmax(hybrid_proba, axis=1)

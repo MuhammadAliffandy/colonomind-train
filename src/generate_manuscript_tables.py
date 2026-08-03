@@ -1,5 +1,6 @@
 import os
 import argparse
+import time
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -22,6 +23,21 @@ import tensorflow_hub as hub
 import dgx_models  # For custom keras functions
 
 np.random.seed(42)
+
+# ── Retry wrapper for I/O operations (DGX storage can be flaky) ──
+def retry_io(func, max_retries=5, delay=10):
+    """Retry a function up to max_retries times on OSError/IOError."""
+    for attempt in range(1, max_retries + 1):
+        try:
+            return func()
+        except (OSError, IOError) as e:
+            if attempt < max_retries:
+                print(f"⚠️  I/O Error (attempt {attempt}/{max_retries}): {e}")
+                print(f"    Retrying in {delay}s...")
+                time.sleep(delay)
+            else:
+                print(f"❌ I/O Error persists after {max_retries} attempts: {e}")
+                raise
 
 # --- Helper Classes and Functions ---
 class LGBMWrapper:
@@ -109,7 +125,7 @@ def draw_confusion_matrix(y_true, y_pred, dataset_name, save_dir):
     plt.ylabel('True Label', fontsize=12)
     plt.title(f'Confusion Matrix - {dataset_name} (Score-weighted)', fontsize=14)
     out_path = os.path.join(save_dir, f'Fig_CM_{dataset_name}.png')
-    plt.savefig(out_path, bbox_inches='tight', dpi=300)
+    retry_io(lambda: plt.savefig(out_path, bbox_inches='tight', dpi=300))
     plt.close()
     print(f"✅ Saved {out_path}")
 
@@ -131,7 +147,7 @@ def draw_table6_plot(table6_data, save_dir):
     
     plt.suptitle("Statistical Analysis for Model Agreement", y=1.05, fontsize=16)
     out_path = os.path.join(save_dir, 'Fig_4_Agreement_Stats.png')
-    plt.savefig(out_path, bbox_inches='tight', dpi=300)
+    retry_io(lambda: plt.savefig(out_path, bbox_inches='tight', dpi=300))
     plt.close()
     print(f"✅ Saved {out_path}")
 
@@ -338,14 +354,20 @@ def main():
         draw_confusion_matrix(y_true, sw_preds, dataset_name, save_dir)
         
     print("\\nSaving all tables to CSV...")
-    pd.DataFrame(table1_rows).to_csv(os.path.join(save_dir, 'Table_1_Primary_Average.csv'), index=False)
-    pd.DataFrame(table2_rows).to_csv(os.path.join(save_dir, 'Table_2_Primary_PerClass.csv'), index=False)
-    pd.DataFrame(table3_rows).to_csv(os.path.join(save_dir, 'Table_3_Secondary_NTUH.csv'), index=False)
-    pd.DataFrame(table4_rows).to_csv(os.path.join(save_dir, 'Table_4_Secondary_LIMUC.csv'), index=False)
-    pd.DataFrame(table5_rows).to_csv(os.path.join(save_dir, 'Table_5_Secondary_TMC-UCM.csv'), index=False)
+    retry_io(lambda: pd.DataFrame(table1_rows).to_csv(os.path.join(save_dir, 'Table_1_Primary_Average.csv'), index=False))
+    print("  ✅ Table 1 saved")
+    retry_io(lambda: pd.DataFrame(table2_rows).to_csv(os.path.join(save_dir, 'Table_2_Primary_PerClass.csv'), index=False))
+    print("  ✅ Table 2 saved")
+    retry_io(lambda: pd.DataFrame(table3_rows).to_csv(os.path.join(save_dir, 'Table_3_Secondary_NTUH.csv'), index=False))
+    print("  ✅ Table 3 saved")
+    retry_io(lambda: pd.DataFrame(table4_rows).to_csv(os.path.join(save_dir, 'Table_4_Secondary_LIMUC.csv'), index=False))
+    print("  ✅ Table 4 saved")
+    retry_io(lambda: pd.DataFrame(table5_rows).to_csv(os.path.join(save_dir, 'Table_5_Secondary_TMC-UCM.csv'), index=False))
+    print("  ✅ Table 5 saved")
     
     df_t6 = pd.DataFrame(table6_data)
-    df_t6.to_csv(os.path.join(save_dir, 'Table_6_Agreement_Thresholds.csv'), index=False)
+    retry_io(lambda: df_t6.to_csv(os.path.join(save_dir, 'Table_6_Agreement_Thresholds.csv'), index=False))
+    print("  ✅ Table 6 saved")
     
     print("Generating Figure 4 (Statistical Analysis for Table 6)...")
     draw_table6_plot(table6_data, save_dir)

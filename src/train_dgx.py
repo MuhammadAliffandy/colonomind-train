@@ -23,9 +23,9 @@ from dgx_models import build_hybrid_model, MODEL_BUILDERS, focal_loss
 
 def main():
     parser = argparse.ArgumentParser(description="ColonoMind DGX Training Script")
-    parser.add_argument("--scenario", type=str, required=True, choices=['Intra', 'Multi'])
-    parser.add_argument("--train_dataset", type=str, required=True, choices=['NTUH', 'LIMUC', 'TMC-UCM'])
-    parser.add_argument("--test_dataset", type=str, required=True, choices=['NTUH', 'LIMUC', 'TMC-UCM'])
+    parser.add_argument("--scenario", type=str, required=True, choices=['Intra', 'Multi', 'Unified'])
+    parser.add_argument("--train_dataset", type=str, required=True, choices=['NTUH', 'LIMUC', 'TMC-UCM', 'Unified'])
+    parser.add_argument("--test_dataset", type=str, required=True, choices=['NTUH', 'LIMUC', 'TMC-UCM', 'Unified'])
     parser.add_argument("--model", type=str, required=True, choices=list(MODEL_BUILDERS.keys()))
     parser.add_argument("--base_dir", type=str, default="..", help="Base directory where Dataset and Dataset+Code folders are located")
     parser.add_argument('--threshold', type=float, default=0.50, help='Confidence threshold for hybrid routing (default: 0.50)')
@@ -55,10 +55,12 @@ def main():
         ]
     }
     TMC_UCM_ROOT = f'{BASE_DIR}/Dataset/TMC-UCM'
-    TRAIN_DIRS = DATASET_PATHS[args.train_dataset]
-    TEST_DIRS  = DATASET_PATHS[args.test_dataset]
+    TRAIN_DIRS = DATASET_PATHS.get(args.train_dataset, [])
+    TEST_DIRS  = DATASET_PATHS.get(args.test_dataset, [])
 
-    if args.scenario == 'Intra':
+    if args.scenario == 'Unified':
+        BASE_SAVE_DIR = f"../Result/Intra_Unified/{args.model}_Experiment"
+    elif args.scenario == 'Intra':
         BASE_SAVE_DIR = f"../Result/Intra_{args.train_dataset}/{args.model}_Experiment"
     else:
         BASE_SAVE_DIR = f"../Result/Multi_{args.train_dataset}_to_{args.test_dataset}/{args.model}_Experiment"
@@ -66,7 +68,26 @@ def main():
 
     # 1. LOAD DATA
     print("Loading Data...")
-    if args.scenario == 'Intra':
+
+    if args.scenario == 'Unified':
+        # ── Unified: merge all 3 datasets, then split 80/20 stratified ──
+        print("  Loading TMC-UCM for Unified...")
+        tmc_imgs, tmc_feats, tmc_labels, tmc_paths = load_tmc_ucm(TMC_UCM_ROOT, split_filter=None)
+        print("  Loading NTUH for Unified...")
+        ntuh_imgs, ntuh_feats, ntuh_labels, ntuh_paths = load_all_images(DATASET_PATHS['NTUH'], 'NTUH')
+        print("  Loading LIMUC for Unified...")
+        limuc_imgs, limuc_feats, limuc_labels, limuc_paths = load_all_images(
+            [DATASET_PATHS['LIMUC'][0], DATASET_PATHS['LIMUC'][1]], 'LIMUC'
+        )
+        all_imgs   = tmc_imgs   + ntuh_imgs   + limuc_imgs
+        all_feats  = tmc_feats  + ntuh_feats  + limuc_feats
+        all_labels = tmc_labels + ntuh_labels + limuc_labels
+        all_paths  = tmc_paths  + ntuh_paths  + limuc_paths
+        print(f"  Unified pool: {len(all_imgs)} images total")
+        X_train_img_raw, X_test_img, X_train_feat_raw, X_test_feat, y_train_label_raw, y_test_label, _, _ = train_test_split(
+            all_imgs, all_feats, all_labels, all_paths, test_size=0.2, random_state=42, stratify=all_labels
+        )
+    elif args.scenario == 'Intra':
         if args.train_dataset == 'LIMUC':
             X_train_img_raw, X_train_feat_raw, y_train_label_raw, _ = load_all_images([TRAIN_DIRS[0]], args.train_dataset)
             X_test_img, X_test_feat, y_test_label, _ = load_all_images([TRAIN_DIRS[1]], args.train_dataset)

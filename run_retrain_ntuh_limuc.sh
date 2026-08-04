@@ -32,6 +32,10 @@ INTRA_SCENARIOS=(
     "Intra LIMUC LIMUC"
 )
 
+UNIFIED_SCENARIOS=(
+    "Unified Unified Unified"
+)
+
 # ─── STAGE 2: Cross-Domain ───
 CROSS_SCENARIOS=(
     "Multi NTUH LIMUC"
@@ -100,6 +104,29 @@ for entry in "${CROSS_SCENARIOS[@]}"; do
 done
 
 # ─────────────────────────────────────────────────
+# STAGE 2.5: UNIFIED DATASET TRAINING
+# ─────────────────────────────────────────────────
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "🔗 STAGE 2.5: UNIFIED DATASET TRAINING (TMC-UCM + NTUH + LIMUC)"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+for model in "${MODELS[@]}"; do
+    METRICS_FILE="../Result/Intra_Unified/${model}_Experiment/${model}_metrics.json"
+    if [ -f "$METRICS_FILE" ]; then
+        echo "⏭️  Skip: Unified / $model (done)"
+        continue
+    fi
+    echo ""
+    echo "🚀 Training Unified Dataset | Model: $model"
+    python train_dgx.py --scenario Unified --train_dataset Unified --test_dataset Unified --model "$model" --base_dir "$BASE_DIR"
+    if [ $? -ne 0 ]; then
+        echo "❌ FAILED: Unified / $model"
+        exit 1
+    fi
+done
+
+# ─────────────────────────────────────────────────
 # STAGE 3: EVALUATION — Tables & Figures per scenario
 # ─────────────────────────────────────────────────
 echo ""
@@ -111,6 +138,7 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 EVAL_DIRS=(
     "Intra_NTUH"
     "Intra_LIMUC"
+    "Intra_Unified"
 )
 
 # Cross evaluations

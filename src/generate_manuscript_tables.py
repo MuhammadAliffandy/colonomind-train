@@ -156,10 +156,18 @@ def main():
     parser.add_argument("--base_dir", type=str, default="..")
     parser.add_argument("--models_dir", type=str, default="../Result/Intra_TMC-UCM")
     parser.add_argument("--threshold", type=float, default=0.50)
+    parser.add_argument("--save_dir", type=str, default=None,
+                        help="Custom output directory. If not set, auto-derived from models_dir name.")
     args = parser.parse_args()
     
-    save_dir = os.path.join(args.base_dir, "Manuscript_Results")
+    if args.save_dir:
+        save_dir = args.save_dir
+    else:
+        # Auto-derive: ../Result/Intra_TMC-UCM -> Manuscript_Results_Intra_TMC-UCM
+        models_dir_name = os.path.basename(os.path.normpath(args.models_dir))
+        save_dir = os.path.join(args.base_dir, f"Manuscript_Results_{models_dir_name}")
     os.makedirs(save_dir, exist_ok=True)
+    print(f"📁 Results will be saved to: {save_dir}")
     
     model_names = ['ResNet-50', 'DenseNet-121', 'EfficientNet-B4', 'ConvNeXt-Tiny', 'ViT-B-16']
     

@@ -23,6 +23,7 @@
 # =================================================================
 
 BASE_DIR="${BASE_DIR:-/home/D13K48009/raid/Clara/new_drive}"
+CACHE_DIR="${CACHE_DIR:-${BASE_DIR}/Dataset_Cache}"
 
 MODELS=("ResNet-50" "DenseNet-121" "EfficientNet-B4" "ConvNeXt-Tiny" "ViT-B-16")
 
@@ -69,7 +70,7 @@ for entry in "${INTRA_SCENARIOS[@]}"; do
         fi
         echo ""
         echo "🚀 Training Intra: $train → $test | Model: $model"
-        python train_dgx.py --scenario "$scenario" --train_dataset "$train" --test_dataset "$test" --model "$model" --base_dir "$BASE_DIR"
+        python train_dgx.py --scenario "$scenario" --train_dataset "$train" --test_dataset "$test" --model "$model" --base_dir "$BASE_DIR" --cache_dir "$CACHE_DIR"
         if [ $? -ne 0 ]; then
             echo "❌ FAILED: Intra $train / $model"
             exit 1
@@ -95,7 +96,7 @@ for entry in "${CROSS_SCENARIOS[@]}"; do
         fi
         echo ""
         echo "🚀 Training Cross: $train → $test | Model: $model"
-        python train_dgx.py --scenario "$scenario" --train_dataset "$train" --test_dataset "$test" --model "$model" --base_dir "$BASE_DIR"
+        python train_dgx.py --scenario "$scenario" --train_dataset "$train" --test_dataset "$test" --model "$model" --base_dir "$BASE_DIR" --cache_dir "$CACHE_DIR"
         if [ $? -ne 0 ]; then
             echo "❌ FAILED: Cross $train→$test / $model"
             exit 1
@@ -119,7 +120,7 @@ for model in "${MODELS[@]}"; do
     fi
     echo ""
     echo "🚀 Training Unified Dataset | Model: $model"
-    python train_dgx.py --scenario Unified --train_dataset Unified --test_dataset Unified --model "$model" --base_dir "$BASE_DIR"
+    python train_dgx.py --scenario Unified --train_dataset Unified --test_dataset Unified --model "$model" --base_dir "$BASE_DIR" --cache_dir "$CACHE_DIR"
     if [ $? -ne 0 ]; then
         echo "❌ FAILED: Unified / $model"
         exit 1

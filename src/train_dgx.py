@@ -29,6 +29,8 @@ def main():
     parser.add_argument("--model", type=str, required=True, choices=list(MODEL_BUILDERS.keys()))
     parser.add_argument("--base_dir", type=str, default="..", help="Base directory where Dataset and Dataset+Code folders are located")
     parser.add_argument('--threshold', type=float, default=0.50, help='Confidence threshold for hybrid routing (default: 0.50)')
+    parser.add_argument('--cache_dir', type=str, default=None,
+                        help='Directory to cache preprocessed datasets. Defaults to ../Dataset_Cache/')
     args = parser.parse_args()
 
     print(f"\n{'='*50}")
@@ -72,12 +74,12 @@ def main():
     if args.scenario == 'Unified':
         # ── Unified: merge all 3 datasets, then split 80/20 stratified ──
         print("  Loading TMC-UCM for Unified...")
-        tmc_imgs, tmc_feats, tmc_labels, tmc_paths = load_tmc_ucm(TMC_UCM_ROOT, split_filter=None)
+        tmc_imgs, tmc_feats, tmc_labels, tmc_paths = load_tmc_ucm(TMC_UCM_ROOT, split_filter=None, cache_dir=args.cache_dir)
         print("  Loading NTUH for Unified...")
-        ntuh_imgs, ntuh_feats, ntuh_labels, ntuh_paths = load_all_images(DATASET_PATHS['NTUH'], 'NTUH')
+        ntuh_imgs, ntuh_feats, ntuh_labels, ntuh_paths = load_all_images(DATASET_PATHS['NTUH'], 'NTUH', cache_dir=args.cache_dir)
         print("  Loading LIMUC for Unified...")
         limuc_imgs, limuc_feats, limuc_labels, limuc_paths = load_all_images(
-            [DATASET_PATHS['LIMUC'][0], DATASET_PATHS['LIMUC'][1]], 'LIMUC'
+            [DATASET_PATHS['LIMUC'][0], DATASET_PATHS['LIMUC'][1]], 'LIMUC', cache_dir=args.cache_dir
         )
         all_imgs   = tmc_imgs   + ntuh_imgs   + limuc_imgs
         all_feats  = tmc_feats  + ntuh_feats  + limuc_feats
@@ -89,26 +91,26 @@ def main():
         )
     elif args.scenario == 'Intra':
         if args.train_dataset == 'LIMUC':
-            X_train_img_raw, X_train_feat_raw, y_train_label_raw, _ = load_all_images([TRAIN_DIRS[0]], args.train_dataset)
-            X_test_img, X_test_feat, y_test_label, _ = load_all_images([TRAIN_DIRS[1]], args.train_dataset)
+            X_train_img_raw, X_train_feat_raw, y_train_label_raw, _ = load_all_images([TRAIN_DIRS[0]], args.train_dataset, cache_dir=args.cache_dir)
+            X_test_img, X_test_feat, y_test_label, _ = load_all_images([TRAIN_DIRS[1]], args.train_dataset, cache_dir=args.cache_dir)
         elif args.train_dataset == 'TMC-UCM':
-            X_train_img_raw, X_train_feat_raw, y_train_label_raw, _ = load_tmc_ucm(TMC_UCM_ROOT, split_filter='Train')
-            X_test_img, X_test_feat, y_test_label, _ = load_tmc_ucm(TMC_UCM_ROOT, split_filter='Test')
+            X_train_img_raw, X_train_feat_raw, y_train_label_raw, _ = load_tmc_ucm(TMC_UCM_ROOT, split_filter='Train', cache_dir=args.cache_dir)
+            X_test_img, X_test_feat, y_test_label, _ = load_tmc_ucm(TMC_UCM_ROOT, split_filter='Test', cache_dir=args.cache_dir)
         else:
-            all_imgs, all_feats, all_labels, all_paths = load_all_images(TRAIN_DIRS, args.train_dataset)
+            all_imgs, all_feats, all_labels, all_paths = load_all_images(TRAIN_DIRS, args.train_dataset, cache_dir=args.cache_dir)
             X_train_img_raw, X_test_img, X_train_feat_raw, X_test_feat, y_train_label_raw, y_test_label, _, _ = train_test_split(
                 all_imgs, all_feats, all_labels, all_paths, test_size=0.2, random_state=42, stratify=all_labels
             )
     else:
         if args.train_dataset == 'TMC-UCM':
-            X_train_img_raw, X_train_feat_raw, y_train_label_raw, _ = load_tmc_ucm(TMC_UCM_ROOT, split_filter=None)
+            X_train_img_raw, X_train_feat_raw, y_train_label_raw, _ = load_tmc_ucm(TMC_UCM_ROOT, split_filter=None, cache_dir=args.cache_dir)
         else:
-            X_train_img_raw, X_train_feat_raw, y_train_label_raw, _ = load_all_images(TRAIN_DIRS, args.train_dataset)
+            X_train_img_raw, X_train_feat_raw, y_train_label_raw, _ = load_all_images(TRAIN_DIRS, args.train_dataset, cache_dir=args.cache_dir)
 
         if args.test_dataset == 'TMC-UCM':
-            X_test_img, X_test_feat, y_test_label, _ = load_tmc_ucm(TMC_UCM_ROOT, split_filter=None)
+            X_test_img, X_test_feat, y_test_label, _ = load_tmc_ucm(TMC_UCM_ROOT, split_filter=None, cache_dir=args.cache_dir)
         else:
-            X_test_img, X_test_feat, y_test_label, _ = load_all_images(TEST_DIRS, args.test_dataset)
+            X_test_img, X_test_feat, y_test_label, _ = load_all_images(TEST_DIRS, args.test_dataset, cache_dir=args.cache_dir)
 
     # We split 20% of training data for Validation (Early Stopping)
     print("Splitting Train into Train/Val (80/20) for strict isolation...")

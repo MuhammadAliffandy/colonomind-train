@@ -1,5 +1,8 @@
 from joblib import Parallel, delayed
 import os
+import time
+import hashlib
+import pickle
 import cv2
 cv2.setNumThreads(0) # Prevent OpenCV deadlock in multiprocessing
 import numpy as np
@@ -26,6 +29,53 @@ FOLDER_TO_LABEL = {
     'Mayo 0': 'MES0', 'Mayo 1': 'MES1', 'Mayo 2': 'MES2', 'Mayo 3': 'MES3'
 }
 
+# ── Cache directory (saved alongside the script) ──────────────────
+_DEFAULT_CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'Dataset_Cache')
+
+
+def _safe_listdir(path, max_retries=5, delay=10):
+    """os.listdir with retry logic for flaky NFS/network drives."""
+    for attempt in range(1, max_retries + 1):
+        try:
+            return os.listdir(path)
+        except (OSError, IOError) as e:
+            if attempt < max_retries:
+                print(f"  ⚠️  listdir error (attempt {attempt}/{max_retries}): {e} — retrying in {delay}s")
+                time.sleep(delay)
+            else:
+                print(f"  ❌ listdir failed after {max_retries} attempts: {e}")
+                raise
+
+
+def _cache_key(identifier: str) -> str:
+    """Generate a short hash key from an identifier string."""
+    return hashlib.md5(identifier.encode()).hexdigest()[:12]
+
+
+def _cache_path(cache_dir: str, key: str) -> str:
+    os.makedirs(cache_dir, exist_ok=True)
+    return os.path.join(cache_dir, f"{key}.pkl")
+
+
+def _load_cache(cache_dir: str, key: str):
+    """Return cached data or None if not found."""
+    path = _cache_path(cache_dir, key)
+    if os.path.exists(path):
+        print(f"  ✅ Cache hit — loading from {path}")
+        with open(path, 'rb') as f:
+            return pickle.load(f)
+    return None
+
+
+def _save_cache(cache_dir: str, key: str, data):
+    """Persist data to cache."""
+    path = _cache_path(cache_dir, key)
+    with open(path, 'wb') as f:
+        pickle.dump(data, f, protocol=pickle.HIGHEST_PROTOCOL)
+    print(f"  💾 Cache saved to {path}")
+
+
+# ─────────────────────────────────────────────────────────────────
 def extract_wavelet_stats(image):
     gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
     coeffs2 = pywt.dwt2(gray, WAVELET)
@@ -61,10 +111,27 @@ def process_single_image(img_path, folder_cls):
     label = FOLDER_TO_LABEL.get(folder_cls, folder_cls)
     return (img_rgb, feats, label, img_path)
 
-def load_all_images(dir_list, dataset_name):
+
+def load_all_images(dir_list, dataset_name, cache_dir=None):
+    """
+    Load and preprocess all images from dir_list for a given dataset.
+    Results are cached to disk so subsequent calls are instant.
+    """
+    if cache_dir is None:
+        cache_dir = _DEFAULT_CACHE_DIR
+
+    # Build a deterministic cache key from the inputs
+    cache_id = f"load_all_images__{dataset_name}__{':'.join(sorted(dir_list))}"
+    key = _cache_key(cache_id)
+
+    cached = _load_cache(cache_dir, key)
+    if cached is not None:
+        return cached
+
+    # ── Fresh load ──
     all_imgs, all_feats, all_labels, all_paths = [], [], [], []
     folder_names = DATASET_CLASS_FOLDERS.get(dataset_name, CLASS_NAMES)
-    
+
     tasks = []
     for dataset_dir in dir_list:
         for folder_cls in folder_names:
@@ -72,25 +139,43 @@ def load_all_images(dir_list, dataset_name):
             if not os.path.exists(cls_dir):
                 print(f'  ⚠️ Folder tidak ditemukan: {cls_dir}')
                 continue
-            for img_name in os.listdir(cls_dir):
+            for img_name in _safe_listdir(cls_dir):
                 if any(k in img_name.lower() for k in IGNORE_KEYWORDS):
                     continue
                 img_path = os.path.join(cls_dir, img_name)
                 tasks.append((img_path, folder_cls))
-                
+
     print(f"  Memproses {len(tasks)} gambar secara paralel menggunakan semua core CPU...")
     results = Parallel(n_jobs=16, batch_size=32, verbose=10)(delayed(process_single_image)(p, c) for p, c in tasks)
-    
+
     for r in results:
         if r is not None:
             all_imgs.append(r[0])
             all_feats.append(r[1])
             all_labels.append(r[2])
             all_paths.append(r[3])
-            
-    return all_imgs, all_feats, all_labels, all_paths
 
-def load_tmc_ucm(tmc_root, split_filter=None):
+    result = (all_imgs, all_feats, all_labels, all_paths)
+    _save_cache(cache_dir, key, result)
+    return result
+
+
+def load_tmc_ucm(tmc_root, split_filter=None, cache_dir=None):
+    """
+    Load and preprocess TMC-UCM images.
+    Results are cached to disk so subsequent calls are instant.
+    """
+    if cache_dir is None:
+        cache_dir = _DEFAULT_CACHE_DIR
+
+    cache_id = f"load_tmc_ucm__{tmc_root}__{split_filter}"
+    key = _cache_key(cache_id)
+
+    cached = _load_cache(cache_dir, key)
+    if cached is not None:
+        return cached
+
+    # ── Fresh load ──
     all_imgs, all_feats, all_labels, all_paths = [], [], [], []
     INT_TO_LABEL = {0: 'MES0', 1: 'MES1', 2: 'MES2', 3: 'MES3'}
     images_dir = os.path.join(tmc_root, 'images')
@@ -102,12 +187,12 @@ def load_tmc_ucm(tmc_root, split_filter=None):
         txt_files.append('test.txt')
 
     tasks = []
-    
+
     # Preload existing files to avoid slow os.path.exists calls on network drives
     existing_images = set()
     if os.path.exists(images_dir):
-        existing_images = set(os.listdir(images_dir))
-        
+        existing_images = set(_safe_listdir(images_dir))
+
     for txt_file in txt_files:
         fp = os.path.join(tmc_root, txt_file)
         if not os.path.exists(fp):
@@ -123,24 +208,26 @@ def load_tmc_ucm(tmc_root, split_filter=None):
                     label_int = int(parts[1])
                 except ValueError:
                     continue
-                
+
                 if fname not in existing_images:
                     continue
                 img_path = os.path.join(images_dir, fname)
                 if any(k in fname.lower() for k in IGNORE_KEYWORDS):
                     continue
-                    
+
                 folder_cls_str = INT_TO_LABEL.get(label_int, f'MES{label_int}')
                 tasks.append((img_path, folder_cls_str))
-                
+
     print(f"  Memproses {len(tasks)} gambar TMC-UCM secara paralel...")
     results = Parallel(n_jobs=16, batch_size=32, verbose=10)(delayed(process_single_image)(p, c) for p, c in tasks)
-    
+
     for r in results:
         if r is not None:
             all_imgs.append(r[0])
             all_feats.append(r[1])
             all_labels.append(r[2])
             all_paths.append(r[3])
-            
-    return all_imgs, all_feats, all_labels, all_paths
+
+    result = (all_imgs, all_feats, all_labels, all_paths)
+    _save_cache(cache_dir, key, result)
+    return result

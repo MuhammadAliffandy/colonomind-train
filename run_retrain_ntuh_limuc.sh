@@ -60,6 +60,8 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo "📦 STAGE 1: INTRA-DOMAIN TRAINING (NTUH, LIMUC)"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
+FAILED_JOBS=()
+
 for entry in "${INTRA_SCENARIOS[@]}"; do
     read -r scenario train test <<< "$entry"
     for model in "${MODELS[@]}"; do
@@ -72,8 +74,9 @@ for entry in "${INTRA_SCENARIOS[@]}"; do
         echo "🚀 Training Intra: $train → $test | Model: $model"
         python train_dgx.py --scenario "$scenario" --train_dataset "$train" --test_dataset "$test" --model "$model" --base_dir "$BASE_DIR" --cache_dir "$CACHE_DIR"
         if [ $? -ne 0 ]; then
-            echo "❌ FAILED: Intra $train / $model"
-            exit 1
+            echo "⚠️  FAILED (will retry later): Intra $train / $model"
+            FAILED_JOBS+=("Intra $train $test $model")
+            continue
         fi
     done
 done
@@ -98,8 +101,9 @@ for entry in "${CROSS_SCENARIOS[@]}"; do
         echo "🚀 Training Cross: $train → $test | Model: $model"
         python train_dgx.py --scenario "$scenario" --train_dataset "$train" --test_dataset "$test" --model "$model" --base_dir "$BASE_DIR" --cache_dir "$CACHE_DIR"
         if [ $? -ne 0 ]; then
-            echo "❌ FAILED: Cross $train→$test / $model"
-            exit 1
+            echo "⚠️  FAILED (will retry later): Cross $train→$test / $model"
+            FAILED_JOBS+=("Multi $train $test $model")
+            continue
         fi
     done
 done
@@ -122,8 +126,9 @@ for model in "${MODELS[@]}"; do
     echo "🚀 Training Unified Dataset | Model: $model"
     python train_dgx.py --scenario Unified --train_dataset Unified --test_dataset Unified --model "$model" --base_dir "$BASE_DIR" --cache_dir "$CACHE_DIR"
     if [ $? -ne 0 ]; then
-        echo "❌ FAILED: Unified / $model"
-        exit 1
+        echo "⚠️  FAILED (will retry later): Unified / $model"
+        FAILED_JOBS+=("Unified Unified Unified $model")
+        continue
     fi
 done
 
@@ -176,13 +181,17 @@ done
 
 echo ""
 echo "╔══════════════════════════════════════════════════════════════╗"
-echo "║  🎉 ALL TRAINING & EVALUATION COMPLETE!                     ║"
-echo "║                                                              ║"
-echo "║  Results are saved in separate folders:                      ║"
-echo "║    ${BASE_DIR}/Manuscript_Results_Intra_NTUH/                ║"
-echo "║    ${BASE_DIR}/Manuscript_Results_Intra_LIMUC/               ║"
-echo "║    ${BASE_DIR}/Manuscript_Results_Multi_NTUH_to_LIMUC/       ║"
-echo "║    ${BASE_DIR}/Manuscript_Results_Multi_NTUH_to_TMC-UCM/     ║"
-echo "║    ${BASE_DIR}/Manuscript_Results_Multi_LIMUC_to_NTUH/       ║"
-echo "║    ${BASE_DIR}/Manuscript_Results_Multi_LIMUC_to_TMC-UCM/    ║"
+echo "║  🎉 PIPELINE COMPLETE                                        ║"
 echo "╚══════════════════════════════════════════════════════════════╝"
+
+if [ ${#FAILED_JOBS[@]} -eq 0 ]; then
+    echo "✅ All models trained successfully!"
+else
+    echo ""
+    echo "⚠️  The following jobs FAILED and need to be retried:"
+    for job in "${FAILED_JOBS[@]}"; do
+        echo "   ❌ $job"
+    done
+    echo ""
+    echo "   To retry, just run this script again — already-done models will be skipped."
+fi

@@ -68,11 +68,21 @@ def _load_cache(cache_dir: str, key: str):
 
 
 def _save_cache(cache_dir: str, key: str, data):
-    """Persist data to cache."""
+    """Persist data to cache. Non-fatal: if disk write fails, warn and continue."""
     path = _cache_path(cache_dir, key)
-    with open(path, 'wb') as f:
-        pickle.dump(data, f, protocol=pickle.HIGHEST_PROTOCOL)
-    print(f"  💾 Cache saved to {path}")
+    for attempt in range(1, 4):
+        try:
+            with open(path, 'wb') as f:
+                pickle.dump(data, f, protocol=pickle.HIGHEST_PROTOCOL)
+            print(f"  💾 Cache saved to {path}")
+            return
+        except (OSError, IOError) as e:
+            if attempt < 3:
+                print(f"  ⚠️  Cache save error (attempt {attempt}/3): {e} — retrying in 10s")
+                time.sleep(10)
+            else:
+                print(f"  ⚠️  Cache save failed after 3 attempts: {e}")
+                print(f"  ℹ️  Training will continue using in-memory data (cache won't be available next run)")
 
 
 # ─────────────────────────────────────────────────────────────────

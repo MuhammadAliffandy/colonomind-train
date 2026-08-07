@@ -100,8 +100,9 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo "📊 STAGE 3: GENERATING FINAL MANUSCRIPT TABLES & FIGURES"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
+# 1. Intra-Domain Master Evaluation (The 10-day sprint request)
 if [ ${#FAILED_JOBS[@]} -eq 0 ]; then
-    echo "✅ All training complete. Generating final manuscript assets..."
+    echo "✅ Generating Unified & Intra-Domain Manuscript Assets..."
     cd src
     python generate_final_manuscript.py --base_dir "$BASE_DIR" --cache_dir "$CACHE_DIR"
     if [ $? -ne 0 ]; then
@@ -109,8 +110,40 @@ if [ ${#FAILED_JOBS[@]} -eq 0 ]; then
     fi
     cd ..
 else
-    echo "⚠️  Skipping Stage 3 because some training jobs failed. Please retry the script first."
+    echo "⚠️  Skipping Stage 3 Master Eval because some training jobs failed."
 fi
+
+# 2. Supplementary Cross-Domain Evaluation (Preserving past results)
+EVAL_CROSS_DIRS=(
+    "Multi_NTUH_to_LIMUC"
+    "Multi_NTUH_to_TMC-UCM"
+    "Multi_LIMUC_to_NTUH"
+    "Multi_LIMUC_to_TMC-UCM"
+)
+
+echo ""
+echo "📊 Generating Supplementary Cross-Domain Results (to not waste past runs)..."
+for dir_name in "${EVAL_CROSS_DIRS[@]}"; do
+    MODELS_PATH="../Result/${dir_name}"
+    SAVE_PATH="${BASE_DIR}/Manuscript_Results_${dir_name}"
+
+    if [ ! -d "$MODELS_PATH" ]; then
+        continue
+    fi
+
+    echo "   Evaluating Cross-Domain: $dir_name"
+    cd src
+    python generate_manuscript_tables.py \
+        --base_dir "$BASE_DIR" \
+        --models_dir "$MODELS_PATH" \
+        --save_dir "$SAVE_PATH" > /dev/null 2>&1
+        
+    python generate_manuscript_figures.py \
+        --base_dir "$BASE_DIR" \
+        --models_dir "$MODELS_PATH" \
+        --save_dir "$SAVE_PATH" > /dev/null 2>&1
+    cd ..
+done
 
 echo ""
 echo "╔══════════════════════════════════════════════════════════════╗"

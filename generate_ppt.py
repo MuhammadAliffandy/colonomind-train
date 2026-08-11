@@ -93,16 +93,16 @@ if os.path.exists(result_dir):
             dataset = parts[-3]  # e.g. Intra_Unified
             model = parts[-2].replace("_Experiment", "") # e.g. ResNet-50
             
-            acc = data.get("Accuracy (%)", 0)
-            f1 = data.get("F1 Score (%)", 0)
+            acc = data.get("Hybrid_Accuracy", data.get("Base_Accuracy", 0)) * 100
+            f1 = data.get("F1-Score", 0) * 100
             auc = data.get("AUC", 0)
             
             metrics.append({
-                "Dataset": dataset,
+                "Dataset": dataset.replace("Intra_", ""),
                 "Model": model,
                 "Accuracy": f"{acc:.2f}%",
                 "F1 Score": f"{f1:.2f}%",
-                "AUC": f"{auc:.4f}"
+                "AUC": f"{auc:.4f}" if auc else "-"
             })
         except Exception as e:
             print(f"Error parsing {jf}: {e}")
@@ -145,11 +145,12 @@ else:
         table.cell(r+1, 3).text = row_data["F1 Score"]
         table.cell(r+1, 4).text = row_data["AUC"]
         
-    # Adjust font sizes
+    # Adjust font sizes and row heights
     for row in table.rows:
+        row.height = Pt(14)
         for cell in row.cells:
             for paragraph in cell.text_frame.paragraphs:
-                paragraph.font.size = Pt(12)
+                paragraph.font.size = Pt(9)
 
 # Save the presentation
 output_name = "ColonoMind_System_Architecture_and_Results.pptx"

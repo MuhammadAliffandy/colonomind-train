@@ -103,12 +103,10 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 # 1. Intra-Domain Master Evaluation (The 10-day sprint request)
 if [ ${#FAILED_JOBS[@]} -eq 0 ]; then
     echo "✅ Generating Unified & Intra-Domain Manuscript Assets..."
-    cd src
     python generate_final_manuscript.py --base_dir "$BASE_DIR" --cache_dir "$CACHE_DIR"
     if [ $? -ne 0 ]; then
         echo "❌ Error generating manuscript tables and figures."
     fi
-    cd ..
 else
     echo "⚠️  Skipping Stage 3 Master Eval because some training jobs failed."
 fi
@@ -132,7 +130,6 @@ for dir_name in "${EVAL_CROSS_DIRS[@]}"; do
     fi
 
     echo "   Evaluating Cross-Domain: $dir_name"
-    cd src
     python generate_manuscript_tables.py \
         --base_dir "$BASE_DIR" \
         --models_dir "$MODELS_PATH" \
@@ -142,7 +139,6 @@ for dir_name in "${EVAL_CROSS_DIRS[@]}"; do
         --base_dir "$BASE_DIR" \
         --models_dir "$MODELS_PATH" \
         --save_dir "$SAVE_PATH" > /dev/null 2>&1
-    cd ..
 done
 
 echo ""

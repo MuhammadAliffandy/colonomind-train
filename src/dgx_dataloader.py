@@ -155,8 +155,8 @@ def load_all_images(dir_list, dataset_name, cache_dir=None):
                 img_path = os.path.join(cls_dir, img_name)
                 tasks.append((img_path, folder_cls))
 
-    print(f"  Memproses {len(tasks)} gambar secara paralel menggunakan semua core CPU...")
-    results = Parallel(n_jobs=16, batch_size=32, verbose=10)(delayed(process_single_image)(p, c) for p, c in tasks)
+    print(f"  Memproses {len(tasks)} gambar secara paralel menggunakan thread CPU...")
+    results = Parallel(n_jobs=16, batch_size=32, verbose=10, backend="threading")(delayed(process_single_image)(p, c) for p, c in tasks)
 
     for r in results:
         if r is not None:
@@ -228,8 +228,8 @@ def load_tmc_ucm(tmc_root, split_filter=None, cache_dir=None):
                 folder_cls_str = INT_TO_LABEL.get(label_int, f'MES{label_int}')
                 tasks.append((img_path, folder_cls_str))
 
-    print(f"  Memproses {len(tasks)} gambar TMC-UCM secara paralel...")
-    results = Parallel(n_jobs=16, batch_size=32, verbose=10)(delayed(process_single_image)(p, c) for p, c in tasks)
+    print(f"  Memproses {len(tasks)} gambar TMC-UCM secara paralel menggunakan thread CPU...")
+    results = Parallel(n_jobs=16, batch_size=32, verbose=10, backend="threading")(delayed(process_single_image)(p, c) for p, c in tasks)
 
     for r in results:
         if r is not None:

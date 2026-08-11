@@ -58,12 +58,22 @@ def _cache_path(cache_dir: str, key: str) -> str:
 
 
 def _load_cache(cache_dir: str, key: str):
-    """Return cached data or None if not found."""
+    """Return cached data or None if not found or if cache is empty (corrupt)."""
     path = _cache_path(cache_dir, key)
     if os.path.exists(path):
-        print(f"  ✅ Cache hit — loading from {path}")
-        with open(path, 'rb') as f:
-            return pickle.load(f)
+        try:
+            with open(path, 'rb') as f:
+                data = pickle.load(f)
+                # Check if cache returned empty lists (corrupt state)
+                if isinstance(data, tuple) and len(data) > 0:
+                    if len(data[0]) == 0:
+                        print(f"  ⚠️ Cache {path} is empty (0 images). Ignoring.")
+                        return None
+                print(f"  ✅ Cache hit — loading from {path}")
+                return data
+        except Exception as e:
+            print(f"  ⚠️ Failed to read cache {path}: {e}")
+            return None
     return None
 
 

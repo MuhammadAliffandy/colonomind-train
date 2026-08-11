@@ -93,9 +93,9 @@ if os.path.exists(result_dir):
             dataset = parts[-3]  # e.g. Intra_Unified
             model = parts[-2].replace("_Experiment", "") # e.g. ResNet-50
             
-            acc = data.get("test_accuracy", 0) * 100
-            f1 = data.get("test_f1", 0) * 100
-            auc = data.get("test_auc", 0)
+            acc = data.get("Accuracy (%)", 0)
+            f1 = data.get("F1 Score (%)", 0)
+            auc = data.get("AUC", 0)
             
             metrics.append({
                 "Dataset": dataset,

@@ -21,9 +21,24 @@ def main():
     print(f"\n🚀 Optimizing Thresholds for Dataset: {args.dataset}")
     print("Loading test dataset (Inference only, no training!)...")
     
-    # Load dataset
-    X_img_test, X_feat_test, y_test, le = load_dataset(args.dataset, limit=None)
-    y_true = le.transform(y_test)
+    # Resolve correct test path. 
+    # Try local 'Dataset/' first, then '../Dataset/'
+    test_path = os.path.join("Dataset", args.dataset, "Test")
+    if not os.path.exists(test_path):
+        test_path = os.path.join("..", "Dataset", args.dataset, "Test")
+        if not os.path.exists(test_path):
+            print(f"❌ Error: Cannot find test dataset path for {args.dataset} at {test_path}")
+            return
+            
+    # load_dataset returns: X_img, X_feat, y_label, img_paths
+    X_img_test, X_feat_test, y_test_label, _ = load_dataset(test_path)
+    
+    # Manually encode labels since we just need integer mapping
+    from sklearn.preprocessing import LabelEncoder
+    le = LabelEncoder()
+    # Fit on all possible classes to ensure consistent mapping
+    le.fit(["MES0", "MES1", "MES2", "MES3"])
+    y_true = le.transform(y_test_label)
     
     models = ["ResNet-50", "DenseNet-121", "EfficientNet-B4", "ConvNeXt-Tiny", "ViT-B-16"]
     thresholds = [0.0, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]

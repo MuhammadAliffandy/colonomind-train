@@ -93,17 +93,28 @@ if os.path.exists(result_dir):
             dataset = parts[-3]  # e.g. Intra_Unified
             model = parts[-2].replace("_Experiment", "") # e.g. ResNet-50
             
-            acc = data.get("Hybrid_Accuracy", data.get("Base_Accuracy", 0)) * 100
+            base_acc = data.get("Base_Accuracy", 0) * 100
+            hyb_acc = data.get("Hybrid_Accuracy", 0) * 100
+            prec = data.get("Precision", 0) * 100
+            rec = data.get("Recall", 0) * 100
+            spec = data.get("Specificity", 0) * 100
             f1 = data.get("F1-Score", 0) * 100
-            auc = data.get("AUC", 0)
+            qwk = data.get("QWK", 0)
             
-            metrics.append({
-                "Dataset": dataset.replace("Intra_", ""),
-                "Model": model,
-                "Accuracy": f"{acc:.2f}%",
-                "F1 Score": f"{f1:.2f}%",
-                "AUC": f"{auc:.4f}" if auc else "-"
-            })
+            # Skip cross domain if the user doesn't want it, but the dynamic script just gets whatever is in Result/
+            # To be safe, let's include only Intra domain runs.
+            if "Multi" not in dataset:
+                metrics.append({
+                    "Dataset": dataset.replace("Intra_", ""),
+                    "Model": model,
+                    "Base Acc": f"{base_acc:.2f}%",
+                    "Hyb Acc": f"{hyb_acc:.2f}%",
+                    "Prec": f"{prec:.2f}%",
+                    "Recall": f"{rec:.2f}%",
+                    "Spec": f"{spec:.2f}%",
+                    "F1": f"{f1:.2f}%",
+                    "QWK": f"{qwk:.4f}"
+                })
         except Exception as e:
             print(f"Error parsing {jf}: {e}")
 else:
@@ -112,7 +123,7 @@ else:
 slide_layout = prs.slide_layouts[5] # blank slide for table
 slide = prs.slides.add_slide(slide_layout)
 title = slide.shapes.title
-title.text = "Current Experimental Results"
+title.text = "Comprehensive Experimental Results"
 
 if not metrics:
     txBox = slide.shapes.add_textbox(Inches(2), Inches(3), Inches(6), Inches(1))
@@ -123,17 +134,17 @@ else:
     metrics = sorted(metrics, key=lambda x: (x["Dataset"], x["Model"]))
     
     rows = len(metrics) + 1
-    cols = 5
-    left = Inches(0.5)
-    top = Inches(1.5)
-    width = Inches(9)
-    height = Inches(0.4 * rows)
+    cols = 9
+    left = Inches(0.2)
+    top = Inches(1.3)
+    width = Inches(9.6)
+    height = Inches(0.3 * rows)
     
     table_shape = slide.shapes.add_table(rows, cols, left, top, width, height)
     table = table_shape.table
     
     # Headers
-    headers = ["Dataset", "Model", "Accuracy", "F1 Score", "AUC"]
+    headers = ["Dataset", "Model", "Base Acc", "Hyb Acc", "Prec", "Recall", "Spec", "F1", "QWK"]
     for i, h in enumerate(headers):
         table.cell(0, i).text = h
         
@@ -141,16 +152,20 @@ else:
     for r, row_data in enumerate(metrics):
         table.cell(r+1, 0).text = row_data["Dataset"]
         table.cell(r+1, 1).text = row_data["Model"]
-        table.cell(r+1, 2).text = row_data["Accuracy"]
-        table.cell(r+1, 3).text = row_data["F1 Score"]
-        table.cell(r+1, 4).text = row_data["AUC"]
+        table.cell(r+1, 2).text = row_data["Base Acc"]
+        table.cell(r+1, 3).text = row_data["Hyb Acc"]
+        table.cell(r+1, 4).text = row_data["Prec"]
+        table.cell(r+1, 5).text = row_data["Recall"]
+        table.cell(r+1, 6).text = row_data["Spec"]
+        table.cell(r+1, 7).text = row_data["F1"]
+        table.cell(r+1, 8).text = row_data["QWK"]
         
     # Adjust font sizes and row heights
     for row in table.rows:
-        row.height = Pt(14)
+        row.height = Pt(12)
         for cell in row.cells:
             for paragraph in cell.text_frame.paragraphs:
-                paragraph.font.size = Pt(9)
+                paragraph.font.size = Pt(8)
 
 # Save the presentation
 output_name = "ColonoMind_System_Architecture_and_Results.pptx"

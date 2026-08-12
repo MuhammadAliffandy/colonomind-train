@@ -138,7 +138,14 @@ def main():
 
         print(f"🔍 Inferencing {mn}...")
         try:
-            model = tf.keras.models.load_model(kp, compile=False)
+            custom_objects = {
+                "resnet50_preprocess": dgx_models.resnet50_preprocess,
+                "densenet_preprocess": dgx_models.densenet_preprocess,
+                "efficientnet_preprocess": dgx_models.efficientnet_preprocess,
+                "convnext_preprocess": dgx_models.convnext_preprocess,
+                "vit_preprocess": dgx_models.vit_preprocess
+            }
+            model = tf.keras.models.load_model(kp, compile=False, custom_objects=custom_objects)
         except Exception as e:
             print(f"   ❌ Load failed: {e}")
             continue

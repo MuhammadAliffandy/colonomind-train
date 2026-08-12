@@ -8,14 +8,12 @@ echo "🗳️  ColonoMind Soft-Voting Ensemble — All Intra Datasets"
 echo "   BASE_DIR = $BASE_DIR"
 echo "============================================================"
 
-# TMC-UCM Result is one level UP (in Clara/) alongside colonomind-train
 echo -e "\n>>> 1. Ensemble: Intra TMC-UCM"
 python -m src.ensemble_eval \
     --dataset TMC-UCM \
-    --models_dir ../Result/Intra_TMC-UCM \
+    --models_dir Result/Intra_TMC-UCM \
     --base_dir "$BASE_DIR"
 
-# NTUH, LIMUC, Unified Results are INSIDE colonomind-train/Result/
 echo -e "\n>>> 2. Ensemble: Intra NTUH"
 python -m src.ensemble_eval \
     --dataset NTUH \

@@ -129,9 +129,11 @@ def main():
         sp = os.path.join(exp_dir, "base_scaler.pkl")
         up = os.path.join(exp_dir, "umap_model.pkl")
 
-        missing = [p for p in [kp, sp, up] if not os.path.exists(p)]
-        if missing:
-            print(f"⏭️  {mn}: skipping — missing {missing}")
+        missing_files = [p for p in [kp, sp, up] if not os.path.exists(p)]
+        if missing_files:
+            print(f"⏭️  {mn}: skipping — MISSING FILES:")
+            for m in missing_files:
+                print(f"      - {m}")
             continue
 
         print(f"🔍 Inferencing {mn}...")

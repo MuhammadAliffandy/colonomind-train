@@ -1,14 +1,13 @@
 """
-ColonoMind - Soft Voting Ensemble Evaluator
-============================================
-Combines all 5 DL models via probability averaging (soft voting).
+ColonoMind - Soft Voting Ensemble Evaluator with TTA
+=====================================================
+Combines all 5 DL models via probability averaging (soft voting)
+with Test Time Augmentation (TTA) for boosted accuracy.
 No retraining required.
 
 Usage (run from colonomind-train/ root):
-    python -m src.ensemble_eval --dataset TMC-UCM --models_dir ../Result/Intra_TMC-UCM
-    python -m src.ensemble_eval --dataset NTUH    --models_dir Result/Intra_NTUH
-    python -m src.ensemble_eval --dataset LIMUC   --models_dir Result/Intra_LIMUC
-    python -m src.ensemble_eval --dataset Unified --models_dir Result/Intra_Unified
+    python -m src.ensemble_eval --dataset TMC-UCM --models_dir Result/Intra_TMC-UCM
+    python -m src.ensemble_eval --dataset TMC-UCM --models_dir Result/Intra_TMC-UCM --tta 5
 """
 import os
 import sys
@@ -23,12 +22,50 @@ import joblib
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # MUST import dgx_models FIRST to register all @register_keras_serializable decorators
-# (resnet50_preprocess, densenet_preprocess, efficientnet_preprocess, etc.)
-from src import dgx_models  # noqa: F401 — side-effect import only
+from src import dgx_models  # noqa: F401
 
 from src.dgx_dataloader import load_all_images, load_tmc_ucm
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
+
+
+# ─────────────────────────────────────────────────────────
+# TTA Augmentation Functions (operate on batches)
+# ─────────────────────────────────────────────────────────
+def apply_tta_augmentations(images, n_augmentations=5):
+    """Generate n augmented versions of each image batch.
+    Returns list of augmented image batches."""
+    augmented_batches = [images]  # Original is always included
+
+    if n_augmentations >= 2:
+        # Horizontal flip
+        augmented_batches.append(images[:, :, ::-1, :])
+
+    if n_augmentations >= 3:
+        # Vertical flip
+        augmented_batches.append(images[:, ::-1, :, :])
+
+    if n_augmentations >= 4:
+        # Slight brightness increase (+10%)
+        bright = np.clip(images * 1.1, 0, 255).astype(np.float32)
+        augmented_batches.append(bright)
+
+    if n_augmentations >= 5:
+        # Slight brightness decrease (-10%)
+        dark = np.clip(images * 0.9, 0, 255).astype(np.float32)
+        augmented_batches.append(dark)
+
+    if n_augmentations >= 6:
+        # Horizontal + Vertical flip
+        augmented_batches.append(images[:, ::-1, ::-1, :])
+
+    if n_augmentations >= 7:
+        # Slight contrast increase
+        mean = np.mean(images, axis=(1, 2, 3), keepdims=True)
+        contrast = np.clip((images - mean) * 1.15 + mean, 0, 255).astype(np.float32)
+        augmented_batches.append(contrast)
+
+    return augmented_batches[:n_augmentations]
 
 
 # ─────────────────────────────────────────────────────────
@@ -71,9 +108,6 @@ def load_test_data(dataset_name, base_dir):
     return np.array(Xti, dtype=np.float32), np.array(Xtf, dtype=np.float32), ytl
 
 
-# ─────────────────────────────────────────────────────────
-# Compute full classification metrics
-# ─────────────────────────────────────────────────────────
 def compute_metrics(y_true, y_pred, label):
     return {
         "Label":  label,
@@ -85,9 +119,16 @@ def compute_metrics(y_true, y_pred, label):
     }
 
 
-# ─────────────────────────────────────────────────────────
-# Main
-# ─────────────────────────────────────────────────────────
+def predict_with_tta(model, X_img, Xs, Xu, n_tta=5):
+    """Run inference with TTA: average probabilities across augmented versions."""
+    aug_batches = apply_tta_augmentations(X_img, n_tta)
+    all_probas = []
+    for aug_imgs in aug_batches:
+        proba = model.predict([aug_imgs, Xs, Xu], verbose=0)
+        all_probas.append(proba)
+    return np.mean(all_probas, axis=0)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset",    type=str, required=True,
@@ -97,12 +138,16 @@ def main():
     parser.add_argument("--base_dir",   type=str,
                         default="/home/D13K48009/raid/Clara/new_drive",
                         help="Root dir containing Dataset/ and Dataset+Code/")
+    parser.add_argument("--tta",        type=int, default=5,
+                        help="Number of TTA augmentations (1=no TTA, 5=default, 7=max)")
     args = parser.parse_args()
+
+    tta_label = f"TTA×{args.tta}" if args.tta > 1 else "No TTA"
 
     print(f"\n{'='*60}")
     print(f"🔬 ColonoMind Soft-Voting Ensemble: {args.dataset}")
     print(f"   models_dir : {args.models_dir}")
-    print(f"   base_dir   : {args.base_dir}")
+    print(f"   TTA        : {tta_label}")
     print(f"{'='*60}\n")
 
     # Load data
@@ -117,7 +162,15 @@ def main():
     class_dist = {c: int((y_true == i).sum()) for i, c in enumerate(le.classes_)}
     print(f"   Class distribution: {class_dist}\n")
 
-    # Run inference per model
+    # Custom objects for Keras model loading
+    custom_objects = {
+        "resnet50_preprocess": dgx_models.resnet50_preprocess,
+        "densenet_preprocess": dgx_models.densenet_preprocess,
+        "efficientnet_preprocess": dgx_models.efficientnet_preprocess,
+        "convnext_preprocess": dgx_models.convnext_preprocess,
+        "vit_preprocess": dgx_models.vit_preprocess
+    }
+
     MODEL_NAMES = ["ResNet-50", "DenseNet-121", "EfficientNet-B4",
                    "ConvNeXt-Tiny", "ViT-B-16"]
     all_probas = {}
@@ -136,15 +189,8 @@ def main():
                 print(f"      - {m}")
             continue
 
-        print(f"🔍 Inferencing {mn}...")
+        print(f"🔍 Inferencing {mn} ({tta_label})...")
         try:
-            custom_objects = {
-                "resnet50_preprocess": dgx_models.resnet50_preprocess,
-                "densenet_preprocess": dgx_models.densenet_preprocess,
-                "efficientnet_preprocess": dgx_models.efficientnet_preprocess,
-                "convnext_preprocess": dgx_models.convnext_preprocess,
-                "vit_preprocess": dgx_models.vit_preprocess
-            }
             model = tf.keras.models.load_model(kp, compile=False, custom_objects=custom_objects)
         except Exception as e:
             print(f"   ❌ Load failed: {e}")
@@ -152,7 +198,11 @@ def main():
 
         Xs = joblib.load(sp).transform(X_feat)
         Xu = joblib.load(up).transform(Xs)
-        proba = model.predict([X_img, Xs, Xu], verbose=0)
+
+        if args.tta > 1:
+            proba = predict_with_tta(model, X_img, Xs, Xu, n_tta=args.tta)
+        else:
+            proba = model.predict([X_img, Xs, Xu], verbose=0)
 
         all_probas[mn] = proba
         row = compute_metrics(y_true, np.argmax(proba, axis=1), mn)
@@ -164,20 +214,20 @@ def main():
         return
 
     # Soft-voting ensemble
-    print(f"\n🗳️  Soft-voting over {len(all_probas)} models...")
+    print(f"\n🗳️  Soft-voting over {len(all_probas)} models ({tta_label})...")
     avg_proba = np.mean(list(all_probas.values()), axis=0)
     ens_preds = np.argmax(avg_proba, axis=1)
-    ens_row   = compute_metrics(y_true, ens_preds, "★ ENSEMBLE (Soft Avg)")
+    ens_row   = compute_metrics(y_true, ens_preds, f"★ ENSEMBLE ({tta_label})")
 
     H = ["Model", "Acc", "F1", "Prec", "Recall", "QWK"]
 
-    print(f"\n\n📊  INDIVIDUAL MODELS — {args.dataset}")
+    print(f"\n\n📊  INDIVIDUAL MODELS — {args.dataset} ({tta_label})")
     print(tabulate(
         [[r["Label"], r["Acc"], r["F1"], r["Prec"], r["Recall"], r["QWK"]]
          for r in individual_rows],
         headers=H, tablefmt="grid"))
 
-    print(f"\n🏆  SOFT-VOTING ENSEMBLE — {args.dataset}")
+    print(f"\n🏆  SOFT-VOTING ENSEMBLE — {args.dataset} ({tta_label})")
     print(tabulate(
         [[ens_row["Label"], ens_row["Acc"], ens_row["F1"],
           ens_row["Prec"], ens_row["Recall"], ens_row["QWK"]]],

@@ -60,17 +60,20 @@ def build_hybrid_model(branch_builder_func, image_input_shape, feat_input_shape,
     model = Model(inputs=[image_input, feat_input, umap_input], outputs=output)
     return model
 
-def create_ResNet_50_branch(input_shape, dropout_rate=0.5):
+def create_ResNet_50_branch(input_shape, dropout_rate=0.3):
     image_input = Input(shape=input_shape, name='image_input_cnn')
     # Preprocess input specifically for ResNet50 (Caffe style)
     x = Lambda(resnet50_preprocess)(image_input)
     aug = tf.keras.layers.RandomFlip("horizontal_and_vertical")(x)
-    aug = tf.keras.layers.RandomRotation(0.2)(aug)
-    aug = tf.keras.layers.RandomZoom(0.2)(aug)
+    aug = tf.keras.layers.RandomRotation(0.15)(aug)
+    aug = tf.keras.layers.RandomZoom(0.15)(aug)
+    aug = tf.keras.layers.RandomTranslation(0.1, 0.1)(aug)
+    aug = tf.keras.layers.RandomBrightness(0.2)(aug)
+    aug = tf.keras.layers.RandomContrast(0.2)(aug)
     base_model = ResNet50(weights='imagenet', include_top=False, input_tensor=aug)
-    # Fully freeze backbone
+    # Freeze backbone then unfreeze last 50 layers for deeper fine-tuning
     for layer in base_model.layers: layer.trainable = False
-    for layer in base_model.layers[-30:]:
+    for layer in base_model.layers[-50:]:
         if not isinstance(layer, BatchNormalization): layer.trainable = True
     x = GlobalAveragePooling2D()(base_model.output)
     x = Dense(512, activation='relu', kernel_regularizer=l2(0.01))(x)
@@ -78,17 +81,20 @@ def create_ResNet_50_branch(input_shape, dropout_rate=0.5):
     x = Dropout(dropout_rate)(x)
     return Model(inputs=image_input, outputs=x, name="ResNet_Branch")
 
-def create_DenseNet_121_branch(input_shape, dropout_rate=0.5):
+def create_DenseNet_121_branch(input_shape, dropout_rate=0.3):
     image_input = Input(shape=input_shape, name='image_input_cnn')
     # Preprocess input specifically for DenseNet121
     x = Lambda(densenet_preprocess)(image_input)
     aug = tf.keras.layers.RandomFlip("horizontal_and_vertical")(x)
-    aug = tf.keras.layers.RandomRotation(0.2)(aug)
-    aug = tf.keras.layers.RandomZoom(0.2)(aug)
+    aug = tf.keras.layers.RandomRotation(0.15)(aug)
+    aug = tf.keras.layers.RandomZoom(0.15)(aug)
+    aug = tf.keras.layers.RandomTranslation(0.1, 0.1)(aug)
+    aug = tf.keras.layers.RandomBrightness(0.2)(aug)
+    aug = tf.keras.layers.RandomContrast(0.2)(aug)
     base_model = DenseNet121(weights='imagenet', include_top=False, input_tensor=aug)
-    # Fully freeze backbone
+    # Freeze backbone then unfreeze last 50 layers for deeper fine-tuning
     for layer in base_model.layers: layer.trainable = False
-    for layer in base_model.layers[-30:]:
+    for layer in base_model.layers[-50:]:
         if not isinstance(layer, BatchNormalization): layer.trainable = True
     x = GlobalAveragePooling2D()(base_model.output)
     x = Dense(512, activation='relu', kernel_regularizer=l2(0.01))(x)
@@ -96,17 +102,20 @@ def create_DenseNet_121_branch(input_shape, dropout_rate=0.5):
     x = Dropout(dropout_rate)(x)
     return Model(inputs=image_input, outputs=x, name="DenseNet_Branch")
 
-def create_EfficientNet_B4_branch(input_shape, dropout_rate=0.5):
+def create_EfficientNet_B4_branch(input_shape, dropout_rate=0.3):
     image_input = Input(shape=input_shape, name='image_input_cnn')
     # Preprocess input specifically for EfficientNetB4
     x = Lambda(efficientnet_preprocess)(image_input)
     aug = tf.keras.layers.RandomFlip("horizontal_and_vertical")(x)
-    aug = tf.keras.layers.RandomRotation(0.2)(aug)
-    aug = tf.keras.layers.RandomZoom(0.2)(aug)
+    aug = tf.keras.layers.RandomRotation(0.15)(aug)
+    aug = tf.keras.layers.RandomZoom(0.15)(aug)
+    aug = tf.keras.layers.RandomTranslation(0.1, 0.1)(aug)
+    aug = tf.keras.layers.RandomBrightness(0.2)(aug)
+    aug = tf.keras.layers.RandomContrast(0.2)(aug)
     base_model = EfficientNetB4(weights='imagenet', include_top=False, input_tensor=aug)
-    # Fully freeze backbone
+    # Freeze backbone then unfreeze last 50 layers for deeper fine-tuning
     for layer in base_model.layers: layer.trainable = False
-    for layer in base_model.layers[-30:]:
+    for layer in base_model.layers[-50:]:
         if not isinstance(layer, BatchNormalization): layer.trainable = True
     x = GlobalAveragePooling2D()(base_model.output)
     x = Dense(512, activation='relu', kernel_regularizer=l2(0.01))(x)
@@ -114,17 +123,20 @@ def create_EfficientNet_B4_branch(input_shape, dropout_rate=0.5):
     x = Dropout(dropout_rate)(x)
     return Model(inputs=image_input, outputs=x, name="EfficientNet_Branch")
 
-def create_ConvNeXt_Tiny_branch(input_shape, dropout_rate=0.5):
+def create_ConvNeXt_Tiny_branch(input_shape, dropout_rate=0.3):
     image_input = Input(shape=input_shape, name='image_input_cnn')
     # Preprocess input specifically for ConvNeXtTiny
     x = Lambda(convnext_preprocess)(image_input)
     aug = tf.keras.layers.RandomFlip("horizontal_and_vertical")(x)
-    aug = tf.keras.layers.RandomRotation(0.2)(aug)
-    aug = tf.keras.layers.RandomZoom(0.2)(aug)
+    aug = tf.keras.layers.RandomRotation(0.15)(aug)
+    aug = tf.keras.layers.RandomZoom(0.15)(aug)
+    aug = tf.keras.layers.RandomTranslation(0.1, 0.1)(aug)
+    aug = tf.keras.layers.RandomBrightness(0.2)(aug)
+    aug = tf.keras.layers.RandomContrast(0.2)(aug)
     base_model = ConvNeXtTiny(weights='imagenet', include_top=False, input_tensor=aug)
-    # Fully freeze backbone
+    # Freeze backbone then unfreeze last 50 layers for deeper fine-tuning
     for layer in base_model.layers: layer.trainable = False
-    for layer in base_model.layers[-30:]:
+    for layer in base_model.layers[-50:]:
         if not isinstance(layer, BatchNormalization): layer.trainable = True
     x = GlobalAveragePooling2D()(base_model.output)
     x = Dense(512, activation='relu', kernel_regularizer=l2(0.01))(x)
@@ -145,13 +157,16 @@ class ViT_B16_Wrapper(Layer):
             return out[list(out.keys())[0]]
         return out
 
-def create_ViT_B_16_branch(input_shape, dropout_rate=0.5):
+def create_ViT_B_16_branch(input_shape, dropout_rate=0.3):
     image_input = Input(shape=input_shape, name='image_input_vit')
     # Preprocess for ViT-B16 TF-Hub (expects [-1, 1])
     x = Lambda(vit_preprocess)(image_input)
     aug = tf.keras.layers.RandomFlip("horizontal_and_vertical")(x)
-    aug = tf.keras.layers.RandomRotation(0.2)(aug)
-    aug = tf.keras.layers.RandomZoom(0.2)(aug)
+    aug = tf.keras.layers.RandomRotation(0.15)(aug)
+    aug = tf.keras.layers.RandomZoom(0.15)(aug)
+    aug = tf.keras.layers.RandomTranslation(0.1, 0.1)(aug)
+    aug = tf.keras.layers.RandomBrightness(0.2)(aug)
+    aug = tf.keras.layers.RandomContrast(0.2)(aug)
     # Backbone is inherently frozen in the wrapper
     x = ViT_B16_Wrapper()(aug)
     x = Dense(512, activation='relu', kernel_regularizer=l2(0.01))(x)

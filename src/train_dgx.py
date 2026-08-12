@@ -21,6 +21,17 @@ from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
 from dgx_dataloader import load_all_images, load_tmc_ucm
 from dgx_models import build_hybrid_model, MODEL_BUILDERS, focal_loss
 
+def focal_loss_with_label_smoothing(gamma=2.5, alpha=0.25, label_smoothing=0.1):
+    """Focal loss with label smoothing for better generalization."""
+    def loss(y_true, y_pred):
+        num_classes = tf.cast(tf.shape(y_true)[-1], tf.float32)
+        y_true_smooth = y_true * (1.0 - label_smoothing) + (label_smoothing / num_classes)
+        y_pred = tf.clip_by_value(y_pred, 1e-8, 1.0)
+        cross_entropy = -y_true_smooth * tf.math.log(y_pred)
+        weight = alpha * tf.math.pow(1 - y_pred, gamma)
+        return tf.reduce_mean(tf.reduce_sum(weight * cross_entropy, axis=1))
+    return loss
+
 def main():
     parser = argparse.ArgumentParser(description="ColonoMind DGX Training Script")
     parser.add_argument("--scenario", type=str, required=True, choices=['Intra', 'Multi', 'Unified'])
@@ -174,21 +185,35 @@ def main():
         feat_input_shape=(20,),
         umap_feat_shape=(2,),
         num_classes=len(le.classes_),
-        dropout_rate=0.5
+        dropout_rate=0.3
     )
 
-    model.compile(optimizer=Adam(learning_rate=1e-4), loss=focal_loss(gamma=2.5, alpha=0.25), metrics=['accuracy'])
+    # Cosine Decay LR schedule for smoother convergence
+    EPOCHS = 150
+    BATCH_SIZE = 32
+    steps_per_epoch = max(1, len(X_img_train) // BATCH_SIZE)
+    cosine_decay = tf.keras.optimizers.schedules.CosineDecay(
+        initial_learning_rate=1e-4,
+        decay_steps=steps_per_epoch * EPOCHS,
+        alpha=1e-6  # minimum LR
+    )
+
+    model.compile(
+        optimizer=Adam(learning_rate=cosine_decay),
+        loss=focal_loss_with_label_smoothing(gamma=2.5, alpha=0.25, label_smoothing=0.1),
+        metrics=['accuracy']
+    )
     
     # Validation strictly uses val set, avoiding test set leakage
     callbacks = [
-        EarlyStopping(monitor='val_accuracy', patience=10, restore_best_weights=True, verbose=1, mode='max'),
-        ReduceLROnPlateau(monitor='val_accuracy', factor=0.5, patience=5, verbose=1, mode='max')
+        EarlyStopping(monitor='val_accuracy', patience=15, restore_best_weights=True, verbose=1, mode='max'),
+        ReduceLROnPlateau(monitor='val_accuracy', factor=0.5, patience=7, verbose=1, mode='max')
     ]
 
     history = model.fit(
         [X_img_train, X_feat_train_scaled, X_train_umap], y_train_cat,
         validation_data=([X_img_val, X_feat_val_scaled, X_val_umap], y_val_cat),
-        batch_size=16, epochs=100, class_weight=class_weight_dict, callbacks=callbacks, verbose=1
+        batch_size=BATCH_SIZE, epochs=EPOCHS, class_weight=class_weight_dict, callbacks=callbacks, verbose=1
     )
 
     model_path = os.path.join(BASE_SAVE_DIR, f"{args.model}_hybrid.keras")

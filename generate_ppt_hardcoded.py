@@ -46,10 +46,10 @@ metrics = {
         {"Model": "DenseNet-121",    "Base Acc": "79.63%", "Hyb Acc": "75.86%", "Prec": "74.23%", "Recall": "74.24%", "F1": "74.23%", "QWK": "0.8702"},
     ],
     "Intra Unified": [
-        {"Model": "ConvNeXt-Tiny",   "Base Acc": "N/A", "Hyb Acc": "79.50%", "Prec": "78.19%", "Recall": "75.65%", "F1": "76.63%", "QWK": "0.9000"},
-        {"Model": "ResNet-50",       "Base Acc": "77.32%", "Hyb Acc": "78.34%", "Prec": "76.15%", "Recall": "74.32%", "F1": "75.16%", "QWK": "0.8950"},
-        {"Model": "ViT-B-16",        "Base Acc": "N/A", "Hyb Acc": "78.22%", "Prec": "75.22%", "Recall": "75.69%", "F1": "75.41%", "QWK": "0.8939"},
-        {"Model": "EfficientNet-B4", "Base Acc": "76.21%", "Hyb Acc": "76.73%", "Prec": "73.52%", "Recall": "73.51%", "F1": "73.43%", "QWK": "0.8871"},
+        {"Model": "ConvNeXt-Tiny",   "Base Acc": "79.06%", "Hyb Acc": "79.50%", "Prec": "78.19%", "Recall": "75.65%", "F1": "76.63%", "QWK": "0.9000"},
+        {"Model": "ResNet-50",       "Base Acc": "77.33%", "Hyb Acc": "78.34%", "Prec": "76.15%", "Recall": "74.32%", "F1": "75.16%", "QWK": "0.8950"},
+        {"Model": "ViT-B-16",        "Base Acc": "77.82%", "Hyb Acc": "78.22%", "Prec": "75.22%", "Recall": "75.69%", "F1": "75.41%", "QWK": "0.8939"},
+        {"Model": "EfficientNet-B4", "Base Acc": "76.41%", "Hyb Acc": "76.73%", "Prec": "73.52%", "Recall": "73.51%", "F1": "73.43%", "QWK": "0.8871"},
         {"Model": "DenseNet-121",    "Base Acc": "76.46%", "Hyb Acc": "76.39%", "Prec": "75.12%", "Recall": "71.74%", "F1": "73.22%", "QWK": "0.8751"},
     ],
     "Intra LIMUC": [

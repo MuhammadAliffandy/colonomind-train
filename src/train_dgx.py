@@ -207,7 +207,7 @@ def main():
     # Validation strictly uses val set, avoiding test set leakage
     callbacks = [
         EarlyStopping(monitor='val_accuracy', patience=15, restore_best_weights=True, verbose=1, mode='max'),
-        ReduceLROnPlateau(monitor='val_accuracy', factor=0.5, patience=7, verbose=1, mode='max')
+        # ReduceLROnPlateau removed: conflicts with CosineDecay LR schedule
     ]
 
     history = model.fit(

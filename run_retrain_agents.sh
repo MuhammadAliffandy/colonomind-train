@@ -52,6 +52,7 @@ for SCENARIO in "${SCENARIOS[@]}"; do
             --model "${MODEL}" \
             --base_dir "${BASE_DIR}" \
             --cache_dir "${CACHE_DIR}" \
+            --threshold 0.55 \
             --agent_only
 
         echo "✅ Finished Agent Retrain for ${MODEL} in ${SCENARIO}"

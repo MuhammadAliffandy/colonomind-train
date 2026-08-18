@@ -19,6 +19,7 @@ from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
 
 from dgx_dataloader import load_all_images, load_tmc_ucm
+import dgx_models
 from dgx_models import build_hybrid_model, MODEL_BUILDERS, focal_loss
 
 def focal_loss_with_label_smoothing(gamma=2.5, alpha=0.25, label_smoothing=0.1):
@@ -239,40 +240,33 @@ def main():
     model.save(model_path)
     print(f"✅ Saved base model to {model_path}")
 
-    # Agent Training (Removed Test set leakage loop)
-    print(f"\\n[2] Training Super Agent (LightGBM on Train)")
-    y_pred_proba_train = model.predict([X_img_train, X_feat_train_scaled, X_train_umap], verbose=0)
-    y_pred_hybrid_train = np.argmax(y_pred_proba_train, axis=1)
-
+    # Agent Training (Trained on Validation Set to prevent overfitting)
+    print(f"\\n[2] Training Super Agent (LightGBM on Validation Set)")
+    y_pred_proba_val = model.predict([X_img_val, X_feat_val_scaled, X_val_umap], verbose=0)
+    
     y_pred_proba_test = model.predict([X_img_test, X_feat_test_scaled, X_test_umap], verbose=0)
-    y_pred_hybrid_test = np.argmax(y_pred_proba_test, axis=1)
 
     def make_features(proba, umap_feat, h_feat):
         df = pd.DataFrame(h_feat, columns=[f"f{i}" for i in range(20)])
+        for i in range(proba.shape[1]):
+            df[f"prob_class_{i}"] = proba[:, i]
         df["confidence"] = np.max(proba, axis=1)
         df["umap_0"] = umap_feat[:, 0]
         df["umap_1"] = umap_feat[:, 1]
         return df
 
-    df_train_ag = make_features(y_pred_proba_train, X_train_umap, X_feat_train_scaled)
+    df_val_ag = make_features(y_pred_proba_val, X_val_umap, X_feat_val_scaled)
     df_test_ag  = make_features(y_pred_proba_test, X_test_umap, X_feat_test_scaled)
     
-    features = ["confidence", "umap_0", "umap_1"] + [f"f{i}" for i in range(20)]
+    num_classes = y_pred_proba_val.shape[1]
+    prob_cols = [f"prob_class_{i}" for i in range(num_classes)]
+    features = prob_cols + ["confidence", "umap_0", "umap_1"] + [f"f{i}" for i in range(20)]
+    
     scaler_ag = StandardScaler()
     
-    # Train Agent ONLY on low confidence training data so it becomes a "Hard Case Expert"
-    conf_train = df_train_ag["confidence"].values
-    low_conf_mask_tr = conf_train < args.threshold
-    
-    # If we have enough hard cases, train only on them. Otherwise fallback to all.
-    if np.sum(low_conf_mask_tr) > 100:
-        print(f"  -> Training Agent strictly on {np.sum(low_conf_mask_tr)} hard cases (Confidence < {args.threshold})")
-        X_tr = scaler_ag.fit_transform(df_train_ag[low_conf_mask_tr][features].values)
-        y_tr = y_train_encoded[low_conf_mask_tr]
-    else:
-        print(f"  -> Training Agent on all {len(df_train_ag)} cases (Not enough hard cases)")
-        X_tr = scaler_ag.fit_transform(df_train_ag[features].values)
-        y_tr = y_train_encoded
+    print(f"  -> Training Agent on all {len(df_val_ag)} validation cases to learn realistic confidence bounds")
+    X_tr = scaler_ag.fit_transform(df_val_ag[features].values)
+    y_tr = y_val_encoded
         
     clf = lgb.LGBMClassifier(random_state=42, class_weight='balanced')
     clf.fit(X_tr, y_tr)

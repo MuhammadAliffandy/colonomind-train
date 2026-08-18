@@ -36,6 +36,8 @@ for MODEL in "${MODELS[@]}"; do
     # Run KD Training
     python train_kd_dgx.py \
         --scenario Unified \
+        --train_dataset Unified \
+        --test_dataset Unified \
         --model "${MODEL}" \
         --base_dir ${BASE_DIR} \
         --cache_dir ${CACHE_DIR}

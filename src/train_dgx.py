@@ -39,7 +39,8 @@ def main():
     parser.add_argument("--test_dataset", type=str, required=True, choices=['NTUH', 'LIMUC', 'TMC-UCM', 'Unified'])
     parser.add_argument("--model", type=str, required=True, choices=list(MODEL_BUILDERS.keys()))
     parser.add_argument("--base_dir", type=str, default="..", help="Base directory where Dataset and Dataset+Code folders are located")
-    parser.add_argument('--threshold', type=float, default=0.50, help='Confidence threshold for hybrid routing (default: 0.50)')
+    parser.add_argument('--threshold', type=float, default=0.75, help='Confidence threshold for passing to Agent')
+    parser.add_argument('--agent_only', action='store_true', help='Skip deep learning train and only retrain the Agent')
     parser.add_argument('--cache_dir', type=str, default=None,
                         help='Directory to cache preprocessed datasets. Defaults to ../Dataset_Cache/')
     args = parser.parse_args()
@@ -51,7 +52,7 @@ def main():
     print(f"Test Dataset: {args.test_dataset}")
     print(f"Model: {args.model}")
     print(f"Base Dir: {args.base_dir}")
-    print(f"{'='*50}\\n")
+    print(f"{'='*50}\n")
 
     BASE_DIR = args.base_dir
     DATASET_PATHS = {
@@ -153,8 +154,6 @@ def main():
     X_feat_val_scaled = scaler.transform(np.array(X_val_feat))
     X_feat_test_scaled  = scaler.transform(np.array(X_test_feat))
 
-    # SMOTE is removed as per reviewer feedback. Class imbalance handled via class_weights/loss
-
     # UMAP
     print("Fitting UMAP on Train...")
     umap_reducer = umap.UMAP(n_neighbors=10, min_dist=0.05, n_components=2, random_state=42)
@@ -174,54 +173,68 @@ def main():
     joblib.dump(umap_reducer, os.path.join(BASE_SAVE_DIR, 'umap_model.pkl'))
 
     # Model Training
-    print(f"\\n[1] Training Base Hybrid Model: {args.model}")
-    from sklearn.utils.class_weight import compute_class_weight
-    class_weights = compute_class_weight(class_weight='balanced', classes=np.unique(y_train_encoded), y=y_train_encoded)
-    class_weight_dict = {i: w for i, w in enumerate(class_weights)}
-
-    model = build_hybrid_model(
-        branch_builder_func=MODEL_BUILDERS[args.model],
-        image_input_shape=(224, 224, 3),
-        feat_input_shape=(20,),
-        umap_feat_shape=(2,),
-        num_classes=len(le.classes_),
-        dropout_rate=0.3
-    )
-
-    # Cosine Decay LR schedule for smoother convergence
-    EPOCHS = 150
-    BATCH_SIZE = 32
-    steps_per_epoch = max(1, len(X_img_train) // BATCH_SIZE)
-    cosine_decay = tf.keras.optimizers.schedules.CosineDecay(
-        initial_learning_rate=1e-4,
-        decay_steps=steps_per_epoch * EPOCHS,
-        alpha=1e-6  # minimum LR
-    )
-
-    model.compile(
-        optimizer=Adam(learning_rate=cosine_decay),
-        loss=focal_loss_with_label_smoothing(gamma=2.5, alpha=0.25, label_smoothing=0.1),
-        metrics=['accuracy']
-    )
-    
-    # Validation strictly uses val set, avoiding test set leakage
-    callbacks = [
-        EarlyStopping(monitor='val_accuracy', patience=15, restore_best_weights=True, verbose=1, mode='max'),
-        # ReduceLROnPlateau removed: conflicts with CosineDecay LR schedule
-    ]
-
-    history = model.fit(
-        [X_img_train, X_feat_train_scaled, X_train_umap], y_train_cat,
-        validation_data=([X_img_val, X_feat_val_scaled, X_val_umap], y_val_cat),
-        batch_size=BATCH_SIZE, epochs=EPOCHS, class_weight=class_weight_dict, callbacks=callbacks, verbose=1
-    )
-
     model_path = os.path.join(BASE_SAVE_DIR, f"{args.model}_hybrid.keras")
-    model.save(model_path)
-    print(f"✅ Saved base model to {model_path}")
+    
+    if args.agent_only:
+        print(f"\n[1] --agent_only flag detected. Skipping Deep Learning training.")
+        if os.path.exists(model_path):
+            print(f"  -> Loading existing model from {model_path}")
+            model = tf.keras.models.load_model(model_path, custom_objects={
+                "resnet50_preprocess": dgx_models.resnet50_preprocess,
+                "densenet_preprocess": dgx_models.densenet_preprocess,
+                "efficientnet_preprocess": dgx_models.efficientnet_preprocess,
+                "convnext_preprocess": dgx_models.convnext_preprocess,
+                "vit_preprocess": dgx_models.vit_preprocess,
+            }, compile=False)
+        else:
+            raise FileNotFoundError(f"Cannot run --agent_only because {model_path} does not exist!")
+    else:
+        print(f"\n[1] Training Base Hybrid Model: {args.model}")
+        from sklearn.utils.class_weight import compute_class_weight
+        class_weights = compute_class_weight(class_weight='balanced', classes=np.unique(y_train_encoded), y=y_train_encoded)
+        class_weight_dict = {i: w for i, w in enumerate(class_weights)}
+
+        model = build_hybrid_model(
+            branch_builder_func=MODEL_BUILDERS[args.model],
+            image_input_shape=(224, 224, 3),
+            feat_input_shape=(20,),
+            umap_feat_shape=(2,),
+            num_classes=len(le.classes_),
+            dropout_rate=0.3
+        )
+
+        # Cosine Decay LR schedule for smoother convergence
+        EPOCHS = 150
+        BATCH_SIZE = 32
+        steps_per_epoch = max(1, len(X_img_train) // BATCH_SIZE)
+        cosine_decay = tf.keras.optimizers.schedules.CosineDecay(
+            initial_learning_rate=1e-4,
+            decay_steps=steps_per_epoch * EPOCHS,
+            alpha=1e-6  # minimum LR
+        )
+
+        model.compile(
+            optimizer=Adam(learning_rate=cosine_decay),
+            loss=focal_loss_with_label_smoothing(gamma=2.5, alpha=0.25, label_smoothing=0.1),
+            metrics=['accuracy']
+        )
+        
+        # Validation strictly uses val set, avoiding test set leakage
+        callbacks = [
+            EarlyStopping(monitor='val_accuracy', patience=15, restore_best_weights=True, verbose=1, mode='max'),
+        ]
+
+        history = model.fit(
+            [X_img_train, X_feat_train_scaled, X_train_umap], y_train_cat,
+            validation_data=([X_img_val, X_feat_val_scaled, X_val_umap], y_val_cat),
+            batch_size=BATCH_SIZE, epochs=EPOCHS, class_weight=class_weight_dict, callbacks=callbacks, verbose=1
+        )
+
+        model.save(model_path)
+        print(f"✅ Saved base model to {model_path}")
 
     # Agent Training (Trained on Validation Set to prevent overfitting)
-    print(f"\\n[2] Training Super Agent (LightGBM on Validation Set)")
+    print(f"\n[2] Training Super Agent (LightGBM on Validation Set)")
     y_pred_proba_val = model.predict([X_img_val, X_feat_val_scaled, X_val_umap], verbose=0)
     
     y_pred_proba_test = model.predict([X_img_test, X_feat_test_scaled, X_test_umap], verbose=0)

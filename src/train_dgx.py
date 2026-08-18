@@ -197,21 +197,21 @@ def main():
 
         model = build_hybrid_model(
             branch_builder_func=MODEL_BUILDERS[args.model],
-            image_input_shape=(224, 224, 3),
+            image_input_shape=(384, 384, 3),
             feat_input_shape=(20,),
             umap_feat_shape=(2,),
             num_classes=len(le.classes_),
             dropout_rate=0.3
         )
 
-        # Cosine Decay LR schedule for smoother convergence
-        EPOCHS = 150
-        BATCH_SIZE = 32
+        # Full unfreeze requires lower LR to prevent catastrophic forgetting
+        EPOCHS = 200
+        BATCH_SIZE = 8
         steps_per_epoch = max(1, len(X_img_train) // BATCH_SIZE)
         cosine_decay = tf.keras.optimizers.schedules.CosineDecay(
-            initial_learning_rate=1e-4,
+            initial_learning_rate=1e-5,
             decay_steps=steps_per_epoch * EPOCHS,
-            alpha=1e-6  # minimum LR
+            alpha=1e-7  # minimum LR
         )
 
         model.compile(
@@ -222,7 +222,7 @@ def main():
         
         # Validation strictly uses val set, avoiding test set leakage
         callbacks = [
-            EarlyStopping(monitor='val_accuracy', patience=15, restore_best_weights=True, verbose=1, mode='max'),
+            EarlyStopping(monitor='val_accuracy', patience=25, restore_best_weights=True, verbose=1, mode='max'),
         ]
 
         history = model.fit(

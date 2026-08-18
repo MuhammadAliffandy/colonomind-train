@@ -13,7 +13,7 @@ try:
 except ImportError:
     from skimage.feature import greycomatrix as graycomatrix, greycoprops as graycoprops
 
-IMG_SIZE = (224, 224)
+IMG_SIZE = (384, 384)
 WAVELET = 'db1'
 CLASS_NAMES = ['MES0', 'MES1', 'MES2', 'MES3']
 IGNORE_KEYWORDS = ['augment', 'mask', 'seg', '._', 'crop']

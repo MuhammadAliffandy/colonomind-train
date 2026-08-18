@@ -193,28 +193,28 @@ def main():
 
     model = build_hybrid_model(
         branch_builder_func=MODEL_BUILDERS[args.model],
-        image_input_shape=(224, 224, 3),
+        image_input_shape=(384, 384, 3),
         feat_input_shape=(20,),
         umap_feat_shape=(2,),
         num_classes=len(le.classes_),
         dropout_rate=0.3
     )
 
-    # Adaptive LR for KD
-    EPOCHS = 150
-    BATCH_SIZE = 32
+    # Full unfreeze requires lower LR to prevent catastrophic forgetting
+    EPOCHS = 200
+    BATCH_SIZE = 8
     
-    # ViT and ConvNeXt need smaller LR to avoid catastrophic forgetting
+    # All models use very conservative LR since entire backbone is trainable
     if args.model in ["ViT-B-16", "ConvNeXt-Tiny"]:
-        base_lr = 1e-5
+        base_lr = 5e-6
     else:
-        base_lr = 5e-5
+        base_lr = 1e-5
 
     steps_per_epoch = max(1, len(X_img_train) // BATCH_SIZE)
     cosine_decay = tf.keras.optimizers.schedules.CosineDecay(
         initial_learning_rate=base_lr,
         decay_steps=steps_per_epoch * EPOCHS,
-        alpha=1e-6
+        alpha=1e-7
     )
 
     # Use CategoricalCrossentropy since we already blended labels
@@ -226,7 +226,7 @@ def main():
     
     # Validation strictly uses val set, avoiding test set leakage
     callbacks = [
-        EarlyStopping(monitor='val_accuracy', patience=15, restore_best_weights=True, verbose=1, mode='max'),
+        EarlyStopping(monitor='val_accuracy', patience=25, restore_best_weights=True, verbose=1, mode='max'),
         # ReduceLROnPlateau removed: conflicts with CosineDecay LR schedule
     ]
 
@@ -283,17 +283,42 @@ def main():
     shutil.copy(tmp_agent_path, agent_path)
     joblib.dump(scaler_ag, scaler_path)
 
-    # 3. FINAL EVALUATION ON UNTOUCHED TEST SET
-    print(f"\\n[3] Final Evaluation on Test Set")
+    # 3. FINAL EVALUATION ON UNTOUCHED TEST SET (with TTA)
+    print(f"\n[3] Final Evaluation on Test Set (with Test-Time Augmentation)")
     y_true = y_test_encoded
     
-    y_pred_deep = np.argmax(y_pred_proba_test, axis=1)
+    # Test-Time Augmentation: average predictions across multiple augmented views
+    TTA_ROUNDS = 5
+    print(f"  🔄 Running TTA with {TTA_ROUNDS} augmentation rounds...")
+    tta_preds = []
+    for tta_i in range(TTA_ROUNDS):
+        if tta_i == 0:
+            # First round: original images (no augmentation)
+            X_tta = X_img_test
+        else:
+            # Subsequent rounds: apply random augmentations
+            X_tta = tf.image.random_flip_left_right(X_img_test)
+            X_tta = tf.image.random_brightness(X_tta, 0.1)
+            X_tta = tf.image.random_contrast(X_tta, 0.9, 1.1)
+            X_tta = X_tta.numpy()
+        pred = model.predict([X_tta, X_feat_test_scaled, X_test_umap], batch_size=8, verbose=0)
+        tta_preds.append(pred)
+        print(f"    TTA round {tta_i+1}/{TTA_ROUNDS} done.")
+    
+    y_pred_proba_test_tta = np.mean(tta_preds, axis=0)
+    
+    y_pred_deep = np.argmax(y_pred_proba_test_tta, axis=1)
     base_acc = accuracy_score(y_true, y_pred_deep)
     
-    conf_test = np.max(y_pred_proba_test, axis=1)
+    conf_test = np.max(y_pred_proba_test_tta, axis=1)
     low_conf_mask = conf_test < args.threshold
     
-    y_pred_hybrid = np.where(low_conf_mask, y_pred_agent, y_pred_deep)
+    # Re-run Agent prediction using TTA-enhanced features
+    df_test_ag_tta = make_features(y_pred_proba_test_tta, X_test_umap, X_feat_test_scaled)
+    X_te_tta = scaler_ag.transform(df_test_ag_tta[features].values)
+    y_pred_agent_tta = clf.predict(X_te_tta)
+    
+    y_pred_hybrid = np.where(low_conf_mask, y_pred_agent_tta, y_pred_deep)
     hybrid_acc = accuracy_score(y_true, y_pred_hybrid)
     
     print(f"  📊 BASE DEEP LEARNING ACCURACY: {base_acc:.4f}  ({base_acc*100:.2f}%)")

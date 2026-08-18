@@ -91,7 +91,7 @@ def main():
     all_val_probs = []
     
     # Batch prediction to prevent memory issues
-    batch_size = 64
+    batch_size = 8  # Lower batch size for 384x384 resolution
     
     for mn in MODEL_NAMES:
         model_path = os.path.join(args.models_dir, f"{mn}_Experiment", f"{mn}_hybrid.keras")

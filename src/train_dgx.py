@@ -205,7 +205,7 @@ def main():
         )
 
         # Full unfreeze requires lower LR to prevent catastrophic forgetting
-        EPOCHS = 200
+        EPOCHS = 100
         BATCH_SIZE = 8
         steps_per_epoch = max(1, len(X_img_train) // BATCH_SIZE)
         cosine_decay = tf.keras.optimizers.schedules.CosineDecay(
@@ -222,7 +222,7 @@ def main():
         
         # Validation strictly uses val set, avoiding test set leakage
         callbacks = [
-            EarlyStopping(monitor='val_accuracy', patience=25, restore_best_weights=True, verbose=1, mode='max'),
+            EarlyStopping(monitor='val_accuracy', patience=15, restore_best_weights=True, verbose=1, mode='max'),
         ]
 
         history = model.fit(

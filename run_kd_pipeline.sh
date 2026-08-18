@@ -17,9 +17,12 @@ echo "======================================================================="
 echo "🎓 STARTING KNOWLEDGE DISTILLATION (KD) PIPELINE"
 echo "======================================================================="
 
+# Enter src directory to ensure relative paths like ../Result work correctly
+cd src
+
 # Step 1: Generate Teacher Probabilities
 echo -e "\n[STEP 1] Generating Teacher Probabilities..."
-python src/generate_teacher_probs.py \
+python generate_teacher_probs.py \
     --scenario Unified \
     --models_dir ${MODELS_DIR} \
     --base_dir ${BASE_DIR} \
@@ -31,7 +34,7 @@ for MODEL in "${MODELS[@]}"; do
     echo -e "\n🚀 Retraining Student Model: ${MODEL}"
     
     # Run KD Training
-    python src/train_kd_dgx.py \
+    python train_kd_dgx.py \
         --scenario Unified \
         --model "${MODEL}" \
         --base_dir ${BASE_DIR} \

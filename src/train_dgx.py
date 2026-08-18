@@ -19,6 +19,7 @@ from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
 
 from dgx_dataloader import load_all_images, load_tmc_ucm
+import dgx_models
 from dgx_models import build_hybrid_model, MODEL_BUILDERS, focal_loss
 
 def focal_loss_with_label_smoothing(gamma=2.5, alpha=0.25, label_smoothing=0.1):

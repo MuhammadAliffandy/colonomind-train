@@ -17,6 +17,7 @@ import tensorflow as tf
 from tensorflow.keras.utils import to_categorical
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
+from tensorflow.keras.layers import BatchNormalization
 
 from dgx_dataloader import load_all_images, load_tmc_ucm
 import dgx_models

@@ -204,14 +204,45 @@ def main():
             dropout_rate=0.3
         )
 
-        # Full unfreeze requires lower LR to prevent catastrophic forgetting
-        EPOCHS = 100
+        # ---------------------------------------------------------
+        # STAGE 1: WARMUP (Train Head Only)
+        # ---------------------------------------------------------
+        print("\\n🔥 STAGE 1: Warmup (Training Head, Backbone Frozen)")
+        WARMUP_EPOCHS = 10
         BATCH_SIZE = 8
+        
+        model.compile(
+            optimizer=Adam(learning_rate=1e-3),
+            loss=focal_loss_with_label_smoothing(gamma=2.5, alpha=0.25, label_smoothing=0.1),
+            metrics=['accuracy']
+        )
+        
+        model.fit(
+            [X_img_train, X_feat_train_scaled, X_train_umap], y_train_cat,
+            validation_data=([X_img_val, X_feat_val_scaled, X_val_umap], y_val_cat),
+            batch_size=BATCH_SIZE, epochs=WARMUP_EPOCHS, class_weight=class_weight_dict, verbose=1
+        )
+
+        # ---------------------------------------------------------
+        # STAGE 2: FINE-TUNING (Full Unfreeze except BN)
+        # ---------------------------------------------------------
+        print("\\n💥 STAGE 2: Full Fine-tuning (Backbone Unfrozen)")
+        # Unfreeze all layers EXCEPT BatchNormalization
+        for layer in model.layers:
+            if isinstance(layer, Model): # Branch models inside Hybrid
+                for sublayer in layer.layers:
+                    if not isinstance(sublayer, BatchNormalization):
+                        sublayer.trainable = True
+            else: # Top-level layers
+                if not isinstance(layer, BatchNormalization):
+                    layer.trainable = True
+
+        EPOCHS = 90
         steps_per_epoch = max(1, len(X_img_train) // BATCH_SIZE)
         cosine_decay = tf.keras.optimizers.schedules.CosineDecay(
-            initial_learning_rate=1e-5,
+            initial_learning_rate=1e-5, # VERY small LR for full backbone
             decay_steps=steps_per_epoch * EPOCHS,
-            alpha=1e-7  # minimum LR
+            alpha=1e-7
         )
 
         model.compile(
@@ -220,7 +251,6 @@ def main():
             metrics=['accuracy']
         )
         
-        # Validation strictly uses val set, avoiding test set leakage
         callbacks = [
             EarlyStopping(monitor='val_accuracy', patience=15, restore_best_weights=True, verbose=1, mode='max'),
         ]

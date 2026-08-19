@@ -71,12 +71,9 @@ def create_ResNet_50_branch(input_shape, dropout_rate=0.3):
     aug = tf.keras.layers.RandomBrightness(0.2)(aug)
     aug = tf.keras.layers.RandomContrast(0.2)(aug)
     base_model = ResNet50(weights='imagenet', include_top=False, input_tensor=aug)
-    # Full unfreeze: all layers trainable EXCEPT BatchNorm (keep frozen to preserve pretrained statistics)
+    # Freeze backbone initially for warmup (prevents catastrophic forgetting)
     for layer in base_model.layers:
-        if isinstance(layer, BatchNormalization):
-            layer.trainable = False
-        else:
-            layer.trainable = True
+        layer.trainable = False
     x = GlobalAveragePooling2D()(base_model.output)
     x = Dense(512, activation='relu', kernel_regularizer=l2(0.01))(x)
     x = BatchNormalization()(x)
@@ -94,12 +91,9 @@ def create_DenseNet_121_branch(input_shape, dropout_rate=0.3):
     aug = tf.keras.layers.RandomBrightness(0.2)(aug)
     aug = tf.keras.layers.RandomContrast(0.2)(aug)
     base_model = DenseNet121(weights='imagenet', include_top=False, input_tensor=aug)
-    # Full unfreeze: all layers trainable EXCEPT BatchNorm (keep frozen to preserve pretrained statistics)
+    # Freeze backbone initially for warmup (prevents catastrophic forgetting)
     for layer in base_model.layers:
-        if isinstance(layer, BatchNormalization):
-            layer.trainable = False
-        else:
-            layer.trainable = True
+        layer.trainable = False
     x = GlobalAveragePooling2D()(base_model.output)
     x = Dense(512, activation='relu', kernel_regularizer=l2(0.01))(x)
     x = BatchNormalization()(x)
@@ -117,12 +111,9 @@ def create_EfficientNet_B4_branch(input_shape, dropout_rate=0.3):
     aug = tf.keras.layers.RandomBrightness(0.2)(aug)
     aug = tf.keras.layers.RandomContrast(0.2)(aug)
     base_model = EfficientNetB4(weights='imagenet', include_top=False, input_tensor=aug)
-    # Full unfreeze: all layers trainable EXCEPT BatchNorm (keep frozen to preserve pretrained statistics)
+    # Freeze backbone initially for warmup (prevents catastrophic forgetting)
     for layer in base_model.layers:
-        if isinstance(layer, BatchNormalization):
-            layer.trainable = False
-        else:
-            layer.trainable = True
+        layer.trainable = False
     x = GlobalAveragePooling2D()(base_model.output)
     x = Dense(512, activation='relu', kernel_regularizer=l2(0.01))(x)
     x = BatchNormalization()(x)
@@ -140,12 +131,9 @@ def create_ConvNeXt_Tiny_branch(input_shape, dropout_rate=0.3):
     aug = tf.keras.layers.RandomBrightness(0.2)(aug)
     aug = tf.keras.layers.RandomContrast(0.2)(aug)
     base_model = ConvNeXtTiny(weights='imagenet', include_top=False, input_tensor=aug)
-    # Full unfreeze: all layers trainable EXCEPT BatchNorm (keep frozen to preserve pretrained statistics)
+    # Freeze backbone initially for warmup (prevents catastrophic forgetting)
     for layer in base_model.layers:
-        if isinstance(layer, BatchNormalization):
-            layer.trainable = False
-        else:
-            layer.trainable = True
+        layer.trainable = False
     x = GlobalAveragePooling2D()(base_model.output)
     x = Dense(512, activation='relu', kernel_regularizer=l2(0.01))(x)
     x = BatchNormalization()(x)

@@ -227,15 +227,18 @@ def main():
         # STAGE 2: FINE-TUNING (Full Unfreeze except BN)
         # ---------------------------------------------------------
         print("\\n💥 STAGE 2: Full Fine-tuning (Backbone Unfrozen)")
-        # Unfreeze all layers EXCEPT BatchNormalization
+        # Unfreeze all layers EXCEPT BatchNormalization (including nested sub-model layers)
+        model.trainable = True  # open the whole model first
         for layer in model.layers:
-            if isinstance(layer, Model): # Branch models inside Hybrid
+            if isinstance(layer, BatchNormalization):
+                layer.trainable = False
+            # Also walk into sub-models (branch CNN builders)
+            elif hasattr(layer, 'layers'):
                 for sublayer in layer.layers:
-                    if not isinstance(sublayer, BatchNormalization):
+                    if isinstance(sublayer, BatchNormalization):
+                        sublayer.trainable = False
+                    else:
                         sublayer.trainable = True
-            else: # Top-level layers
-                if not isinstance(layer, BatchNormalization):
-                    layer.trainable = True
 
         EPOCHS = 90
         steps_per_epoch = max(1, len(X_img_train) // BATCH_SIZE)

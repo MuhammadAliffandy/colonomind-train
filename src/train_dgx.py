@@ -319,7 +319,16 @@ def main():
     base_acc = accuracy_score(y_true, y_pred_deep)
     
     conf_test = np.max(y_pred_proba_test, axis=1)
-    low_conf_mask = conf_test < args.threshold
+    
+    # Get Agent probabilities and confidences
+    y_pred_proba_agent = clf.predict_proba(X_te)
+    conf_agent = np.max(y_pred_proba_agent, axis=1)
+    y_pred_agent = np.argmax(y_pred_proba_agent, axis=1)
+    
+    # SMART DELEGATION:
+    # 1. CNN must be uncertain (< threshold)
+    # 2. Agent must be MORE confident than CNN
+    low_conf_mask = (conf_test < args.threshold) & (conf_agent > conf_test)
     
     y_pred_hybrid = np.where(low_conf_mask, y_pred_agent, y_pred_deep)
     hybrid_acc = accuracy_score(y_true, y_pred_hybrid)

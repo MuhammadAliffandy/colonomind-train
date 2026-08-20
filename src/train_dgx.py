@@ -338,29 +338,37 @@ def main():
     print(f"  🔍 Delegated {low_conf_mask.sum()} / {len(low_conf_mask)} low-confidence cases to Agent")
     print(f"  🚀 FINAL HYBRID ACCURACY:       {hybrid_acc:.4f}  ({hybrid_acc*100:.2f}%)")
 
-    acc = accuracy_score(y_true, y_pred_hybrid)
-    prec = precision_score(y_true, y_pred_hybrid, average='macro', zero_division=0)
-    rec = recall_score(y_true, y_pred_hybrid, average='macro', zero_division=0)
-    f1 = f1_score(y_true, y_pred_hybrid, average='macro', zero_division=0)
-    kappa = cohen_kappa_score(y_true, y_pred_hybrid, weights='quadratic')
-    
-    cm = confusion_matrix(y_true, y_pred_hybrid)
-    specs = []
-    for i in range(len(le.classes_)):
-        tn = np.sum(cm) - np.sum(cm[i,:]) - np.sum(cm[:,i]) + cm[i,i]
-        fp = np.sum(cm[:,i]) - cm[i,i]
-        specs.append(tn / (tn + fp + 1e-6))
-    spec = np.mean(specs)
+    # Calculate metrics for BASE model
+    acc_base = accuracy_score(y_true, y_pred_deep)
+    prec_base = precision_score(y_true, y_pred_deep, average='macro', zero_division=0)
+    rec_base = recall_score(y_true, y_pred_deep, average='macro', zero_division=0)
+    f1_base = f1_score(y_true, y_pred_deep, average='macro', zero_division=0)
+    kappa_base = cohen_kappa_score(y_true, y_pred_deep, weights='quadratic')
+    cm_base = confusion_matrix(y_true, y_pred_deep)
+
+    # Calculate metrics for HYBRID model
+    acc_hybrid = accuracy_score(y_true, y_pred_hybrid)
+    prec_hybrid = precision_score(y_true, y_pred_hybrid, average='macro', zero_division=0)
+    rec_hybrid = recall_score(y_true, y_pred_hybrid, average='macro', zero_division=0)
+    f1_hybrid = f1_score(y_true, y_pred_hybrid, average='macro', zero_division=0)
+    kappa_hybrid = cohen_kappa_score(y_true, y_pred_hybrid, weights='quadratic')
+    cm_hybrid = confusion_matrix(y_true, y_pred_hybrid)
 
     metrics = {
         'Model': args.model,
-        'Base_Accuracy': float(base_acc),
-        'Hybrid_Accuracy': float(hybrid_acc),
-        'Precision': float(prec),
-        'Recall': float(rec),
-        'Specificity': float(spec),
-        'F1-Score': float(f1),
-        'QWK': float(kappa)
+        'Base_Accuracy': float(acc_base),
+        'Base_Precision': float(prec_base),
+        'Base_Recall': float(rec_base),
+        'Base_F1-Score': float(f1_base),
+        'Base_QWK': float(kappa_base),
+        'Base_ConfusionMatrix': cm_base.tolist(),
+        
+        'Hybrid_Accuracy': float(acc_hybrid),
+        'Hybrid_Precision': float(prec_hybrid),
+        'Hybrid_Recall': float(rec_hybrid),
+        'Hybrid_F1-Score': float(f1_hybrid),
+        'Hybrid_QWK': float(kappa_hybrid),
+        'Hybrid_ConfusionMatrix': cm_hybrid.tolist()
     }
 
     metrics_path = os.path.join(BASE_SAVE_DIR, f"{args.model}_metrics.json")

@@ -23,7 +23,7 @@ def main():
     full_report = []
 
     for scenario in scenarios:
-        print(f"🔍 Analyzing Scenario: {scenario}")
+        print(f"\\n🔍 Analyzing Scenario: {scenario}")
         scenario_data = []
         
         for model in models:
@@ -32,48 +32,49 @@ def main():
             if os.path.exists(metrics_path):
                 with open(metrics_path, 'r') as f:
                     data = json.load(f)
+                    # We handle both the OLD json format and NEW json format for backward compatibility
                     base_acc = data.get('Base_Accuracy', 0) * 100
                     hybrid_acc = data.get('Hybrid_Accuracy', 0) * 100
                     
-                    # Calculate relative improvement of Hybrid over Base
+                    base_qwk = data.get('Base_QWK', 0.0)
+                    hybrid_qwk = data.get('Hybrid_QWK', data.get('QWK', 0.0))
+                    
+                    base_f1 = data.get('Base_F1-Score', 0.0)
+                    hybrid_f1 = data.get('Hybrid_F1-Score', data.get('F1-Score', 0.0))
+                    
+                    base_cm = str(data.get('Base_ConfusionMatrix', 'N/A')).replace('\\n', '')
+                    hybrid_cm = str(data.get('Hybrid_ConfusionMatrix', 'N/A')).replace('\\n', '')
+                    
                     delta_hybrid = hybrid_acc - base_acc
+                    delta_str = f"+{delta_hybrid:.2f}%" if delta_hybrid > 0 else f"{delta_hybrid:.2f}%"
                     
                     scenario_data.append([
                         model, 
-                        f"{base_acc:.2f}%", 
-                        f"{hybrid_acc:.2f}%", 
-                        f"+{delta_hybrid:.2f}%" if delta_hybrid > 0 else f"{delta_hybrid:.2f}%"
+                        f"{base_acc:.2f}%", f"{hybrid_acc:.2f}%", delta_str,
+                        f"{base_qwk:.4f}", f"{hybrid_qwk:.4f}",
+                        base_cm, hybrid_cm
                     ])
+                    
+                    # For CSV
+                    full_report.append({
+                        'Scenario': scenario.replace("Intra_", ""),
+                        'Model': model,
+                        'Base_Acc': f"{base_acc:.2f}%",
+                        'Hybrid_Acc': f"{hybrid_acc:.2f}%",
+                        'Delta_Acc': delta_str,
+                        'Base_QWK': f"{base_qwk:.4f}",
+                        'Hybrid_QWK': f"{hybrid_qwk:.4f}",
+                        'Base_F1': f"{base_f1:.4f}",
+                        'Hybrid_F1': f"{hybrid_f1:.4f}",
+                        'Base_CM': base_cm,
+                        'Hybrid_CM': hybrid_cm
+                    })
             else:
-                scenario_data.append([model, "Missing", "Missing", "N/A"])
+                scenario_data.append([model, "Missing", "Missing", "N/A", "N/A", "N/A", "N/A", "N/A"])
         
         # Print table for this scenario
-        headers = ["Model", "1. Base Model", "2. Hybrid Agent", "Agent Impact"]
+        headers = ["Model", "Base Acc", "Hybrid Acc", "Impact", "Base QWK", "Hybrid QWK", "Base CM", "Hybrid CM"]
         print(tabulate(scenario_data, headers=headers, tablefmt="github"))
-        
-        # Add Ensemble Row (The Ultimate Progression)
-        ens_acc = ensemble_results[scenario]['Acc']
-        ens_qwk = ensemble_results[scenario]['QWK']
-        
-        # Find the best hybrid model in this scenario to calculate ensemble impact
-        best_hybrid = max([float(x[2].replace('%', '')) for x in scenario_data if x[2] != "Missing"])
-        delta_ens = ens_acc - best_hybrid
-        
-        print("\n🏆 ULTIMATE PROGRESSION (MODEL AGREEMENT):")
-        print(f"   -> 3. Ensemble (TTAx5) Accuracy : {ens_acc:.2f}%")
-        print(f"   -> Ensemble vs Best Hybrid      : {'+' if delta_ens > 0 else ''}{delta_ens:.2f}%")
-        print(f"   -> Ensemble QWK (Clinical Std)  : {ens_qwk:.4f}")
-        print("-" * 70 + "\n")
-        
-        # Save to full report
-        for row in scenario_data:
-            full_report.append({
-                'Scenario': scenario.replace("Intra_", ""),
-                'Model': row[0],
-                'Base_Acc': row[1],
-                'Hybrid_Acc': row[2],
-                'Ensemble_Acc': f"{ens_acc:.2f}% (TTAx5)"
-            })
             
     # Save as CSV for easy copy-pasting to Excel/PPT
     df = pd.DataFrame(full_report)

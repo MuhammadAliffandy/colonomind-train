@@ -375,7 +375,7 @@ def main():
     with open(metrics_path, 'w') as f:
         json.dump(metrics, f, indent=4)
         
-    print(f"✅ Evaluation Complete. Test Accuracy: {acc:.4f}, Test QWK: {kappa:.4f}")
+    print(f"✅ Evaluation Complete. Test Accuracy: {acc_hybrid:.4f}, Test QWK: {kappa_hybrid:.4f}")
     print(f"📁 Results saved to {BASE_SAVE_DIR}")
 
 if __name__ == "__main__":

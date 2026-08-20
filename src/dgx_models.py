@@ -163,8 +163,12 @@ def create_ViT_B_16_branch(input_shape, dropout_rate=0.3):
     aug = tf.keras.layers.RandomTranslation(0.1, 0.1)(aug)
     aug = tf.keras.layers.RandomBrightness(0.2)(aug)
     aug = tf.keras.layers.RandomContrast(0.2)(aug)
+    
+    # Resize specifically for ViT because the TF-Hub model is hardcoded to 224x224
+    aug_resized = tf.keras.layers.Resizing(224, 224)(aug)
+    
     # Backbone is inherently frozen in the wrapper
-    x = ViT_B16_Wrapper()(aug)
+    x = ViT_B16_Wrapper()(aug_resized)
     x = Dense(512, activation='relu', kernel_regularizer=l2(0.01))(x)
     x = BatchNormalization()(x)
     x = Dropout(dropout_rate)(x)

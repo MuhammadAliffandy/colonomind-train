@@ -7,8 +7,7 @@
 # models. This takes ~30 minutes total instead of 3 days!
 # =================================================================
 
-set -e
-
+# set -e (removed so it can gracefully skip unfinished models)
 SCENARIOS=("Unified" "TMC-UCM" "NTUH" "LIMUC")
 MODELS=("ResNet-50" "DenseNet-121" "EfficientNet-B4" "ConvNeXt-Tiny" "ViT-B-16")
 

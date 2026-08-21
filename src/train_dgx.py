@@ -14,6 +14,8 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_sc
 import lightgbm as lgb
 import optuna
 import scipy.stats
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning)
 
 import tensorflow as tf
 from tensorflow.keras.utils import to_categorical

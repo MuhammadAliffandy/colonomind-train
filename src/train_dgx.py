@@ -346,7 +346,7 @@ def main():
             'lambda_l2': trial.suggest_float('lambda_l2', 1e-4, 5.0, log=True),
             'feature_fraction': trial.suggest_float('feature_fraction', 0.5, 1.0),
             'class_weight': 'balanced',
-            'n_jobs': -1
+            'n_jobs': 8  # Fixed from -1 to prevent thread deadlock on DGX
         }
         cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
         cv_scores = []
@@ -368,7 +368,7 @@ def main():
     print(f"  -> Optuna Best CV Accuracy: {study.best_value:.4f}")
     
     # Train final Agent with best params
-    clf = lgb.LGBMClassifier(**study.best_params, random_state=42, class_weight='balanced', n_jobs=-1)
+    clf = lgb.LGBMClassifier(**study.best_params, random_state=42, class_weight='balanced', n_jobs=8)
     clf.fit(X_tr, y_tr)
     
     X_te = scaler_ag.transform(df_test_ag.values)

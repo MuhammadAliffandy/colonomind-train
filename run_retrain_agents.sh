@@ -8,7 +8,7 @@
 # =================================================================
 
 # set -e (removed so it can gracefully skip unfinished models)
-SCENARIOS=("Unified" "TMC-UCM" "NTUH" "LIMUC")
+SCENARIOS=("TMC-UCM") # Only running on the dataset that has finished V2 training
 MODELS=("ResNet-50" "DenseNet-121" "EfficientNet-B4" "ConvNeXt-Tiny" "ViT-B-16")
 
 BASE_DIR="/home/D13K48009/raid/Clara/new_drive"

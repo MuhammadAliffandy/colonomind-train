@@ -8,10 +8,12 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import umap
 
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, StratifiedKFold
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix, cohen_kappa_score
 import lightgbm as lgb
+import optuna
+import scipy.stats
 
 import tensorflow as tf
 from tensorflow.keras.utils import to_categorical
@@ -268,38 +270,101 @@ def main():
         model.save(model_path)
         print(f"✅ Saved base model to {model_path}")
 
-    # Agent Training (Trained on Validation Set to prevent overfitting)
-    print(f"\n[2] Training Super Agent (LightGBM on Validation Set)")
+    # =========================================================================
+    # 2. UPGRADED SUPER AGENT TRAINING (Deep Features + Entropy + Optuna)
+    # =========================================================================
+    print(f"\\n[2] Training Super Agent (LightGBM on Validation Set)")
+    
+    # Extract Deep Features (the rich dense layer just before softmax)
+    # model.layers[-2] is the Dropout layer. We take its output.
+    feature_extractor = tf.keras.Model(inputs=model.inputs, outputs=model.layers[-2].output)
+    
+    # Get raw predictions and deep features
     y_pred_proba_val = model.predict([X_img_val, X_feat_val_scaled, X_val_umap], verbose=0)
+    deep_feat_val = feature_extractor.predict([X_img_val, X_feat_val_scaled, X_val_umap], verbose=0)
     
     y_pred_proba_test = model.predict([X_img_test, X_feat_test_scaled, X_test_umap], verbose=0)
+    deep_feat_test = feature_extractor.predict([X_img_test, X_feat_test_scaled, X_test_umap], verbose=0)
 
-    def make_features(proba, umap_feat, h_feat):
+    def make_features(proba, umap_feat, h_feat, deep_feat):
+        # Base features (Handcrafted)
         df = pd.DataFrame(h_feat, columns=[f"f{i}" for i in range(20)])
+        
+        # Probabilities
         for i in range(proba.shape[1]):
             df[f"prob_class_{i}"] = proba[:, i]
+            
+        # Confidence and Entropy (crucial for detecting confused CNN)
         df["confidence"] = np.max(proba, axis=1)
+        df["entropy"] = scipy.stats.entropy(proba, axis=1)
+        
+        # UMAP
         df["umap_0"] = umap_feat[:, 0]
         df["umap_1"] = umap_feat[:, 1]
+        
+        # Deep Features (Rich representations)
+        for i in range(deep_feat.shape[1]):
+            df[f"deep_{i}"] = deep_feat[:, i]
+            
         return df
 
-    df_val_ag = make_features(y_pred_proba_val, X_val_umap, X_feat_val_scaled)
-    df_test_ag  = make_features(y_pred_proba_test, X_test_umap, X_feat_test_scaled)
+    df_val_ag = make_features(y_pred_proba_val, X_val_umap, X_feat_val_scaled, deep_feat_val)
+    df_test_ag  = make_features(y_pred_proba_test, X_test_umap, X_feat_test_scaled, deep_feat_test)
     
-    num_classes = y_pred_proba_val.shape[1]
-    prob_cols = [f"prob_class_{i}" for i in range(num_classes)]
-    features = prob_cols + ["confidence", "umap_0", "umap_1"] + [f"f{i}" for i in range(20)]
-    
+    features = list(df_val_ag.columns)
     scaler_ag = StandardScaler()
     
-    print(f"  -> Training Agent on all {len(df_val_ag)} validation cases to learn realistic confidence bounds")
-    X_tr = scaler_ag.fit_transform(df_val_ag[features].values)
+    print(f"  -> Extracting {len(features)} total features (Deep + Probs + Entropy + UMAP + HC)")
+    X_tr = scaler_ag.fit_transform(df_val_ag.values)
     y_tr = y_val_encoded
+    
+    # ---------------------------------------------------------
+    # OPTUNA HYPERPARAMETER TUNING
+    # ---------------------------------------------------------
+    print("  -> Running Optuna to find best Agent parameters (preventing overfit)...")
+    optuna.logging.set_verbosity(optuna.logging.WARNING)
+    
+    def objective(trial):
+        param = {
+            'objective': 'multiclass',
+            'metric': 'multi_logloss',
+            'num_class': len(le.classes_),
+            'verbosity': -1,
+            'boosting_type': 'gbdt',
+            'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.1, log=True),
+            'num_leaves': trial.suggest_int('num_leaves', 10, 50),
+            'max_depth': trial.suggest_int('max_depth', 3, 10),
+            'min_data_in_leaf': trial.suggest_int('min_data_in_leaf', 5, 20),
+            'lambda_l1': trial.suggest_float('lambda_l1', 1e-4, 5.0, log=True),
+            'lambda_l2': trial.suggest_float('lambda_l2', 1e-4, 5.0, log=True),
+            'feature_fraction': trial.suggest_float('feature_fraction', 0.5, 1.0),
+            'class_weight': 'balanced',
+            'n_jobs': -1
+        }
+        cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+        cv_scores = []
         
-    clf = lgb.LGBMClassifier(random_state=42, class_weight='balanced')
+        for train_idx, val_idx in cv.split(X_tr, y_tr):
+            X_tr_fold, X_val_fold = X_tr[train_idx], X_tr[val_idx]
+            y_tr_fold, y_val_fold = y_tr[train_idx], y_tr[val_idx]
+            
+            model = lgb.LGBMClassifier(**param)
+            model.fit(X_tr_fold, y_tr_fold, eval_set=[(X_val_fold, y_val_fold)], callbacks=[lgb.early_stopping(30, verbose=False)])
+            
+            preds = model.predict(X_val_fold)
+            cv_scores.append(accuracy_score(y_val_fold, preds))
+        return np.mean(cv_scores)
+
+    study = optuna.create_study(direction='maximize')
+    study.optimize(objective, n_trials=15) # Fast 15 trials
+    
+    print(f"  -> Optuna Best CV Accuracy: {study.best_value:.4f}")
+    
+    # Train final Agent with best params
+    clf = lgb.LGBMClassifier(**study.best_params, random_state=42, class_weight='balanced', n_jobs=-1)
     clf.fit(X_tr, y_tr)
     
-    X_te = scaler_ag.transform(df_test_ag[features].values)
+    X_te = scaler_ag.transform(df_test_ag.values)
     y_pred_agent = clf.predict(X_te)
     
     # Save Super Agent

@@ -287,26 +287,31 @@ def main():
     deep_feat_test = feature_extractor.predict([X_img_test, X_feat_test_scaled, X_test_umap], verbose=0)
 
     def make_features(proba, umap_feat, h_feat, deep_feat):
+        # We use a dictionary to build features to avoid Pandas PerformanceWarning 
+        # (highly fragmented DataFrame) when adding 256+ columns in a loop.
+        feature_dict = {}
+        
         # Base features (Handcrafted)
-        df = pd.DataFrame(h_feat, columns=[f"f{i}" for i in range(20)])
+        for i in range(20):
+            feature_dict[f"f{i}"] = h_feat[:, i]
         
         # Probabilities
         for i in range(proba.shape[1]):
-            df[f"prob_class_{i}"] = proba[:, i]
+            feature_dict[f"prob_class_{i}"] = proba[:, i]
             
         # Confidence and Entropy (crucial for detecting confused CNN)
-        df["confidence"] = np.max(proba, axis=1)
-        df["entropy"] = scipy.stats.entropy(proba, axis=1)
+        feature_dict["confidence"] = np.max(proba, axis=1)
+        feature_dict["entropy"] = scipy.stats.entropy(proba, axis=1)
         
         # UMAP
-        df["umap_0"] = umap_feat[:, 0]
-        df["umap_1"] = umap_feat[:, 1]
+        feature_dict["umap_0"] = umap_feat[:, 0]
+        feature_dict["umap_1"] = umap_feat[:, 1]
         
         # Deep Features (Rich representations)
         for i in range(deep_feat.shape[1]):
-            df[f"deep_{i}"] = deep_feat[:, i]
+            feature_dict[f"deep_{i}"] = deep_feat[:, i]
             
-        return df
+        return pd.DataFrame(feature_dict)
 
     df_val_ag = make_features(y_pred_proba_val, X_val_umap, X_feat_val_scaled, deep_feat_val)
     df_test_ag  = make_features(y_pred_proba_test, X_test_umap, X_feat_test_scaled, deep_feat_test)

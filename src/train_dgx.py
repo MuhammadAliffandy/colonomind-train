@@ -247,8 +247,13 @@ def main():
 
         EPOCHS = 90
         steps_per_epoch = max(1, len(X_img_train) // BATCH_SIZE)
+        if args.model in ["ViT-B-16", "ConvNeXt-Tiny"]:
+            base_lr = 5e-6
+        else:
+            base_lr = 1e-5
+
         cosine_decay = tf.keras.optimizers.schedules.CosineDecay(
-            initial_learning_rate=1e-5, # VERY small LR for full backbone
+            initial_learning_rate=base_lr,
             decay_steps=steps_per_epoch * EPOCHS,
             alpha=1e-7
         )
@@ -383,9 +388,45 @@ def main():
     shutil.copy(tmp_agent_path, agent_path)
     joblib.dump(scaler_ag, scaler_path)
 
-    # 3. FINAL EVALUATION ON UNTOUCHED TEST SET
-    print(f"\\n[3] Final Evaluation on Test Set")
+    # 3. FINAL EVALUATION ON UNTOUCHED TEST SET (with 5-Round TTA)
+    print(f"\n[3] Final Evaluation on Test Set (with 5-Round Test-Time Augmentation)")
     y_true = y_test_encoded
+    
+    TTA_ROUNDS = 5
+    print(f"  🔄 Running TTA with {TTA_ROUNDS} augmentation rounds...")
+    tta_probs = []
+    tta_deep_feats = []
+    
+    for tta_i in range(TTA_ROUNDS):
+        if tta_i == 0:
+            # Round 1: Original test images
+            X_tta = X_img_test
+        elif tta_i == 1:
+            # Round 2: Horizontal flip
+            X_tta = tf.image.random_flip_left_right(X_img_test).numpy()
+        elif tta_i == 2:
+            # Round 3: Vertical flip
+            X_tta = tf.image.random_flip_up_down(X_img_test).numpy()
+        elif tta_i == 3:
+            # Round 4: Brightness adjustment
+            X_tta = tf.image.random_brightness(X_img_test, 0.1).numpy()
+        else:
+            # Round 5: Contrast adjustment
+            X_tta = tf.image.random_contrast(X_img_test, 0.9, 1.1).numpy()
+            
+        prob_pred = model.predict([X_tta, X_feat_test_scaled, X_test_umap], batch_size=8, verbose=0)
+        deep_pred = feature_extractor.predict([X_tta, X_feat_test_scaled, X_test_umap], batch_size=8, verbose=0)
+        
+        tta_probs.append(prob_pred)
+        tta_deep_feats.append(deep_pred)
+        print(f"    -> TTA round {tta_i+1}/{TTA_ROUNDS} completed.")
+        
+    y_pred_proba_test = np.mean(tta_probs, axis=0)
+    deep_feat_test = np.mean(tta_deep_feats, axis=0)
+    
+    # Reconstruct test features for Agent using TTA-enhanced deep representations
+    df_test_ag = make_features(y_pred_proba_test, X_test_umap, X_feat_test_scaled, deep_feat_test)
+    X_te = scaler_ag.transform(df_test_ag.values)
     
     y_pred_deep = np.argmax(y_pred_proba_test, axis=1)
     base_acc = accuracy_score(y_true, y_pred_deep)

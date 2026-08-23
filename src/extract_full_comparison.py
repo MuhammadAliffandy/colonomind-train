@@ -1,11 +1,16 @@
 import os
 import json
+import argparse
 import pandas as pd
 from tabulate import tabulate
 
 def main():
+    parser = argparse.ArgumentParser(description="Extract Comparison Metrics")
+    parser.add_argument("--result_dir", type=str, default="../Result", help="Directory where results are saved")
+    args = parser.parse_args()
+    
     print("=========================================================================")
-    print("📊 COLONOMIND: PROGRESSION REPORT (BASE -> HYBRID -> ENSEMBLE)")
+    print(f"📊 COLONOMIND: PROGRESSION REPORT ({args.result_dir})")
     print("=========================================================================\n")
     
     scenarios = ['Intra_Unified', 'Intra_TMC-UCM', 'Intra_NTUH', 'Intra_LIMUC']
@@ -27,7 +32,7 @@ def main():
         scenario_data = []
         
         for model in models:
-            metrics_path = f"../Result/{scenario}/{model}_Experiment/{model}_metrics.json"
+            metrics_path = f"{args.result_dir}/{scenario}/{model}_Experiment/{model}_metrics.json"
             
             if os.path.exists(metrics_path):
                 with open(metrics_path, 'r') as f:
@@ -77,9 +82,10 @@ def main():
         print(tabulate(scenario_data, headers=headers, tablefmt="github"))
             
     # Save as CSV for easy copy-pasting to Excel/PPT
+    csv_path = f"{args.result_dir}/Progression_Report_Full.csv"
     df = pd.DataFrame(full_report)
-    df.to_csv("../Result/Progression_Report_Full.csv", index=False)
-    print("✅ Full report saved to: Result/Progression_Report_Full.csv")
+    df.to_csv(csv_path, index=False)
+    print(f"✅ Full report saved to: {csv_path}")
     print("💡 You can directly open this CSV in Excel or copy it to your UI/PPT.")
 
 if __name__ == "__main__":

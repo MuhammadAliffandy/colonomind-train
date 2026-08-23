@@ -45,6 +45,7 @@ def main():
     parser.add_argument("--test_dataset", type=str, required=True, choices=['NTUH', 'LIMUC', 'TMC-UCM', 'Unified'])
     parser.add_argument("--model", type=str, required=True, choices=list(MODEL_BUILDERS.keys()))
     parser.add_argument("--base_dir", type=str, default="..", help="Base directory where Dataset and Dataset+Code folders are located")
+    parser.add_argument("--result_dir", type=str, default="../Result", help="Directory where results will be saved")
     parser.add_argument('--threshold', type=float, default=0.75, help='Confidence threshold for passing to Agent')
     parser.add_argument('--agent_only', action='store_true', help='Skip deep learning train and only retrain the Agent')
     parser.add_argument('--cache_dir', type=str, default=None,
@@ -79,11 +80,11 @@ def main():
     TEST_DIRS  = DATASET_PATHS.get(args.test_dataset, [])
 
     if args.scenario == 'Unified':
-        BASE_SAVE_DIR = f"../Result/Intra_Unified/{args.model}_Experiment"
+        BASE_SAVE_DIR = f"{args.result_dir}/Intra_Unified/{args.model}_Experiment"
     elif args.scenario == 'Intra':
-        BASE_SAVE_DIR = f"../Result/Intra_{args.train_dataset}/{args.model}_Experiment"
+        BASE_SAVE_DIR = f"{args.result_dir}/Intra_{args.train_dataset}/{args.model}_Experiment"
     else:
-        BASE_SAVE_DIR = f"../Result/Multi_{args.train_dataset}_to_{args.test_dataset}/{args.model}_Experiment"
+        BASE_SAVE_DIR = f"{args.result_dir}/Multi_{args.train_dataset}_to_{args.test_dataset}/{args.model}_Experiment"
     os.makedirs(BASE_SAVE_DIR, exist_ok=True)
 
     # 1. LOAD DATA

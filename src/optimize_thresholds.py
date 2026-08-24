@@ -99,7 +99,15 @@ def main():
         X_feat_test_scaled = base_scaler.transform(X_feat_test)
         X_test_umap = umap_reducer.transform(X_feat_test_scaled)
         
-        y_pred_proba_test = model.predict([X_img_test, X_feat_test_scaled, X_test_umap], verbose=1)
+        # Auto-resize images if the model is V1 (224x224) vs V2 (384x384)
+        expected_shape = model.input[0].shape[1:3]
+        if tuple(X_img_test.shape[1:3]) != tuple(expected_shape):
+            print(f"      [Auto-Fix] Resizing images from {X_img_test.shape[1:3]} to {expected_shape} to match model...")
+            X_img_eval = tf.image.resize(X_img_test, expected_shape).numpy()
+        else:
+            X_img_eval = X_img_test
+            
+        y_pred_proba_test = model.predict([X_img_eval, X_feat_test_scaled, X_test_umap], verbose=1)
         y_pred_deep = np.argmax(y_pred_proba_test, axis=1)
         base_acc = accuracy_score(y_true, y_pred_deep)
         

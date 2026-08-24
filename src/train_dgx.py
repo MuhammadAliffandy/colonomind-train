@@ -48,6 +48,7 @@ def main():
     parser.add_argument("--result_dir", type=str, default="../Result", help="Directory where results will be saved")
     parser.add_argument('--threshold', type=float, default=0.75, help='Confidence threshold for passing to Agent')
     parser.add_argument('--agent_only', action='store_true', help='Skip deep learning train and only retrain the Agent')
+    parser.add_argument('--image_size', type=int, default=384, help='Image resolution (e.g. 384 for V2, 224 for V1)')
     parser.add_argument('--cache_dir', type=str, default=None,
                         help='Directory to cache preprocessed datasets. Defaults to ../Dataset_Cache/')
     args = parser.parse_args()
@@ -58,9 +59,13 @@ def main():
     print(f"Train Dataset: {args.train_dataset}")
     print(f"Test Dataset: {args.test_dataset}")
     print(f"Model: {args.model}")
+    print(f"Resolution: {args.image_size}x{args.image_size}")
     print(f"Base Dir: {args.base_dir}")
     print(f"{'='*50}\n")
 
+    # Configuration
+    BATCH_SIZE = 8
+    IMAGE_SIZE = (args.image_size, args.image_size)
     BASE_DIR = args.base_dir
     DATASET_PATHS = {
         'NTUH': [

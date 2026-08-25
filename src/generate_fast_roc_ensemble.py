@@ -53,19 +53,23 @@ def load_test_data(dataset_name, base_dir=".."):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--models_dir", type=str, default="../Result", help="Directory containing the Intra folders")
+    parser.add_argument("--models_dirs", type=str, default="../Result,../Result_old_mixed,../Result_backup_v1", 
+                        help="Comma-separated list of directories containing the Intra folders")
     parser.add_argument("--base_dir", type=str, default="/home/D13K48009/raid/Clara/new_drive", help="Base directory containing the Dataset/ folder")
     args = parser.parse_args()
 
     models_list = ["ResNet-50", "DenseNet-121", "EfficientNet-B4", "ConvNeXt-Tiny", "ViT-B-16"]
     datasets = ["TMC-UCM", "LIMUC", "NTUH", "Unified"]
+    search_dirs = [d.strip() for d in args.models_dirs.split(',')]
     
     le = LabelEncoder()
     le.fit(["MES0", "MES1", "MES2", "MES3"])
     
-    out_dir = os.path.join(args.models_dir, "Ensemble_ROC_Results")
+    # Save output to the first directory in the list
+    out_dir = os.path.join(search_dirs[0], "Ensemble_ROC_Results")
     os.makedirs(out_dir, exist_ok=True)
-    print(f"\n🚀 Fast ROC & Ensemble Evaluator")
+    print(f"\n🚀 Fast ROC & Ensemble Evaluator (Multi-Folder Search)")
+    print(f"Searching in folders: {search_dirs}")
     print(f"Results will be saved to: {out_dir}\n")
     
     ensemble_results = []
@@ -74,15 +78,7 @@ def main():
         print(f"==================================================")
         print(f"📊 Processing Dataset: {dataset}")
         
-        if dataset == "Unified":
-            d_dir = os.path.join(args.models_dir, "Unified")
-        else:
-            d_dir = os.path.join(args.models_dir, f"Intra_{dataset}")
-            
-        if not os.path.exists(d_dir):
-            print(f"⏭️  Skipping {dataset} (Directory {d_dir} not found)")
-            continue
-            
+        # Load test data once per dataset
         print("Loading test data...")
         X_img_test, X_feat_test, y_test_label = load_test_data(dataset, base_dir=args.base_dir)
         if X_img_test is None:
@@ -96,13 +92,29 @@ def main():
         all_y_preds = [] # For majority voting
         
         for model_name in models_list:
-            exp_dir = os.path.join(d_dir, f"{model_name}_Experiment")
-            keras_path = os.path.join(exp_dir, f"{model_name}_hybrid.keras")
-            if not os.path.exists(keras_path):
-                keras_path = os.path.join(exp_dir, f"{model_name}_hybrid.h5")
-                
-            if not os.path.exists(keras_path):
-                print(f"  [!] Missing {model_name}, skipping...")
+            keras_path = None
+            exp_dir = None
+            
+            # Search through the provided directories for the model
+            for search_dir in search_dirs:
+                if dataset == "Unified":
+                    d_dir = os.path.join(search_dir, "Unified")
+                else:
+                    d_dir = os.path.join(search_dir, f"Intra_{dataset}")
+                    
+                candidate_exp_dir = os.path.join(d_dir, f"{model_name}_Experiment")
+                candidate_keras = os.path.join(candidate_exp_dir, f"{model_name}_hybrid.keras")
+                if not os.path.exists(candidate_keras):
+                    candidate_keras = os.path.join(candidate_exp_dir, f"{model_name}_hybrid.h5")
+                    
+                if os.path.exists(candidate_keras):
+                    keras_path = candidate_keras
+                    exp_dir = candidate_exp_dir
+                    print(f"  🔍 Found {model_name} in {search_dir}")
+                    break
+                    
+            if keras_path is None or exp_dir is None:
+                print(f"  [!] Missing {model_name} in all provided folders, skipping...")
                 continue
                 
             print(f"  🧠 Inferencing {model_name}...")

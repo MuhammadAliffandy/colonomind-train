@@ -93,6 +93,7 @@ class RobustGenerator(Sequence):
         self.augment = augment 
         self.img_size = img_size
         self.indexes = np.arange(len(self.imgs))
+        super().__init__()
         
     def __len__(self): return int(np.ceil(len(self.imgs) / self.batch_size))
     
@@ -111,7 +112,7 @@ class RobustGenerator(Sequence):
             if self.augment: img = apply_heavy_augmentation(img)
             X_img[i] = img / 255.0
             
-        return [X_img, X_feat, X_umap], y
+        return tuple((X_img, X_feat, X_umap)), y
     
     def on_epoch_end(self):
         if self.shuffle: np.random.shuffle(self.indexes)

@@ -105,10 +105,8 @@ class RobustGenerator(Sequence):
         y = self.labels[idxs]
         
         for i, idx in enumerate(idxs):
-            img_path = self.imgs[idx]
-            img = cv2.imread(str(img_path))
-            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            img = smart_preprocess(img, self.img_size)
+            img = self.imgs[idx]
+            img = cv2.resize(img, self.img_size)
             
             if self.augment: img = apply_heavy_augmentation(img)
             X_img[i] = img / 255.0
@@ -175,6 +173,15 @@ def build_robust_model(img_size):
 # ==============================================================================
 # 4. TRAINING PIPELINE
 # ==============================================================================
+def extract_patient_id(path):
+    fname = os.path.basename(path)
+    if 'train_and_validation_sets' in path or 'test_set' in path:
+        return fname.split('_')[0]
+    elif 'TMC-UCM' in path:
+        return fname.split('_')[0]
+    else:
+        return fname.split('-')[0]
+
 def load_unified_data(base_dir):
     print("\n📦 Loading Strict Unified Dataset (Patient-Level Split)...")
     tmc_root = f'{base_dir}/Dataset/TMC-UCM'
@@ -186,16 +193,16 @@ def load_unified_data(base_dir):
     li, lf, ll, lp = load_all_images(limuc_paths, 'LIMUC')
     
     all_imgs = ti + ni + li
-    all_feats = tf_ + nf + lf
+    all_feats = np.array(tf_ + nf + lf)
     all_labels = tl + nl + ll
-    all_patients = tp + np_ + lp
+    all_paths = tp + np_ + lp
+    all_patients = [extract_patient_id(p) for p in all_paths]
     
     le = LabelEncoder()
     le.fit(['MES0', 'MES1', 'MES2', 'MES3'])
     all_labels_encoded = le.transform(all_labels)
     
-    # Strict Patient Grouping
-    df = pd.DataFrame({'path': all_imgs, 'label': all_labels_encoded, 'patient': all_patients})
+    df = pd.DataFrame({'idx': range(len(all_imgs)), 'path': all_paths, 'label': all_labels_encoded, 'patient': all_patients})
     patients = df['patient'].unique()
     
     train_p, test_p = train_test_split(patients, test_size=0.2, random_state=42)
@@ -206,18 +213,7 @@ def load_unified_data(base_dir):
     test_df = df[df['patient'].isin(test_p)]
     
     print(f"Data Split: Train={len(train_df)} | Val={len(val_df)} | Test={len(test_df)}")
-    return train_df, val_df, test_df
-
-def extract_features_bulk(df, img_size):
-    feats = []
-    print("Extracting handcrafted features...")
-    for path in tqdm(df['path'].values):
-        img = cv2.imread(str(path))
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        img = smart_preprocess(img, img_size)
-        f = extract_handcrafted(img)
-        feats.append(f)
-    return np.array(feats)
+    return train_df, val_df, test_df, all_imgs, all_feats
 
 def plot_roc(y_true, y_pred_proba, dataset_name, out_dir):
     Y_bin = label_binarize(y_true, classes=[0,1,2,3])
@@ -255,19 +251,11 @@ def main():
     os.makedirs(args.save_dir, exist_ok=True)
     IMG_SIZE = (args.img_size, args.img_size)
     
-    train_df, val_df, test_df = load_unified_data(args.base_dir)
+    train_df, val_df, test_df, all_imgs, all_feats = load_unified_data(args.base_dir)
     
-    # Caching features to save time on resume
-    cache_path = os.path.join(args.save_dir, "feature_cache.npz")
-    if os.path.exists(cache_path):
-        print("Loading cached handcrafted features...")
-        data = np.load(cache_path)
-        X_train_f, X_val_f, X_test_f = data['train'], data['val'], data['test']
-    else:
-        X_train_f = extract_features_bulk(train_df, IMG_SIZE)
-        X_val_f = extract_features_bulk(val_df, IMG_SIZE)
-        X_test_f = extract_features_bulk(test_df, IMG_SIZE)
-        np.savez(cache_path, train=X_train_f, val=X_val_f, test=X_test_f)
+    X_train_f = all_feats[train_df['idx'].values]
+    X_val_f = all_feats[val_df['idx'].values]
+    X_test_f = all_feats[test_df['idx'].values]
     
     print("Fitting Scaler & UMAP...")
     scaler = StandardScaler()
@@ -283,9 +271,13 @@ def main():
     joblib.dump(scaler, os.path.join(args.save_dir, "scaler_unified.pkl"))
     joblib.dump(umap_model, os.path.join(args.save_dir, "umap_unified.pkl"))
     
-    train_gen = RobustGenerator(train_df['path'].values, X_train_f_s, X_train_u, train_df['label'].values, batch_size=16, shuffle=True, augment=True, img_size=IMG_SIZE)
-    val_gen = RobustGenerator(val_df['path'].values, X_val_f_s, X_val_u, val_df['label'].values, batch_size=16, shuffle=False, augment=False, img_size=IMG_SIZE)
-    test_gen = RobustGenerator(test_df['path'].values, X_test_f_s, X_test_u, test_df['label'].values, batch_size=16, shuffle=False, augment=False, img_size=IMG_SIZE)
+    train_imgs = [all_imgs[i] for i in train_df['idx'].values]
+    val_imgs = [all_imgs[i] for i in val_df['idx'].values]
+    test_imgs = [all_imgs[i] for i in test_df['idx'].values]
+    
+    train_gen = RobustGenerator(train_imgs, X_train_f_s, X_train_u, train_df['label'].values, batch_size=16, shuffle=True, augment=True, img_size=IMG_SIZE)
+    val_gen = RobustGenerator(val_imgs, X_val_f_s, X_val_u, val_df['label'].values, batch_size=16, shuffle=False, augment=False, img_size=IMG_SIZE)
+    test_gen = RobustGenerator(test_imgs, X_test_f_s, X_test_u, test_df['label'].values, batch_size=16, shuffle=False, augment=False, img_size=IMG_SIZE)
     
     model_path = os.path.join(args.save_dir, "best_hybrid_keras.h5")
     if os.path.exists(model_path):

@@ -106,7 +106,7 @@ class RobustGenerator(Sequence):
         
         for i, idx in enumerate(idxs):
             img_path = self.imgs[idx]
-            img = cv2.imread(img_path)
+            img = cv2.imread(str(img_path))
             img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
             img = smart_preprocess(img, self.img_size)
             
@@ -212,7 +212,7 @@ def extract_features_bulk(df, img_size):
     feats = []
     print("Extracting handcrafted features...")
     for path in tqdm(df['path'].values):
-        img = cv2.imread(path)
+        img = cv2.imread(str(path))
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         img = smart_preprocess(img, img_size)
         f = extract_handcrafted(img)

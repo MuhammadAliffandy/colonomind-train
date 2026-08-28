@@ -12,7 +12,7 @@ import tensorflow as tf
 from tqdm import tqdm
 from skimage.feature import graycomatrix, graycoprops
 from sklearn.metrics import classification_report, confusion_matrix, accuracy_score, precision_score, recall_score, f1_score, cohen_kappa_score, roc_curve, auc
-from sklearn.preprocessing import StandardScaler, label_binarize
+from sklearn.preprocessing import StandardScaler, label_binarize, LabelEncoder
 from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
 import seaborn as sns

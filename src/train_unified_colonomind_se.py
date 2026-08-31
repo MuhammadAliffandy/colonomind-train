@@ -300,27 +300,38 @@ def main():
     print("\n🧠 Extracting Deep Features for Hybrid Agent...")
     feat_extractor = Model(inputs=model.input, outputs=model.get_layer('Fusion').output)
     
-    def extract_deep(gen):
+    def extract_deep(gen, cache_file):
+        if os.path.exists(cache_file):
+            print(f"Loading cached features from {cache_file}...")
+            data = np.load(cache_file)
+            return data['feats'], data['preds'], data['trues']
+            
         feats, preds, trues = [], [], []
         for i in range(len(gen)):
             inp, y = gen[i]
             feats.append(feat_extractor.predict_on_batch(inp))
             preds.append(model.predict_on_batch(inp))
             trues.extend(np.argmax(y, axis=1))
-        return np.vstack(feats), np.vstack(preds), np.array(trues)
+            
+        feats_arr = np.vstack(feats)
+        preds_arr = np.vstack(preds)
+        trues_arr = np.array(trues)
+        np.savez(cache_file, feats=feats_arr, preds=preds_arr, trues=trues_arr)
+        return feats_arr, preds_arr, trues_arr
     
-    deep_train, pred_train, y_train = extract_deep(train_gen)
-    deep_test, pred_test, y_test = extract_deep(test_gen)
+    deep_train, pred_train, y_train = extract_deep(train_gen, os.path.join(args.save_dir, "deep_train_cache.npz"))
+    deep_test, pred_test, y_test = extract_deep(test_gen, os.path.join(args.save_dir, "deep_test_cache.npz"))
     
-    df_ag_train = pd.DataFrame(deep_train)
-    df_ag_train["confidence"] = np.max(pred_train, axis=1)
+    # Using raw numpy to avoid pandas mixed-column-type errors in StandardScaler
+    conf_train = np.max(pred_train, axis=1, keepdims=True)
+    conf_test = np.max(pred_test, axis=1, keepdims=True)
     
-    df_ag_test = pd.DataFrame(deep_test)
-    df_ag_test["confidence"] = np.max(pred_test, axis=1)
+    X_ag_tr_raw = np.hstack([deep_train, conf_train])
+    X_ag_te_raw = np.hstack([deep_test, conf_test])
     
     ag_scaler = StandardScaler()
-    X_ag_tr = ag_scaler.fit_transform(df_ag_train)
-    X_ag_te = ag_scaler.transform(df_ag_test)
+    X_ag_tr = ag_scaler.fit_transform(X_ag_tr_raw)
+    X_ag_te = ag_scaler.transform(X_ag_te_raw)
     joblib.dump(ag_scaler, os.path.join(args.save_dir, "agent_scaler.pkl"))
     
     print("Training LightGBM Agent...")
@@ -340,21 +351,22 @@ def main():
     # Optimize threshold
     best_thresh = 0.5
     best_acc = 0
+    conf_test_1d = conf_test.flatten()
     for t in np.arange(0.5, 0.99, 0.05):
-        hybrid = np.where(df_ag_test["confidence"] < t, agent_preds, base_preds)
+        hybrid = np.where(conf_test_1d < t, agent_preds, base_preds)
         acc = accuracy_score(y_test, hybrid)
         if acc > best_acc:
             best_acc = acc
             best_thresh = t
             
-    final_hybrid = np.where(df_ag_test["confidence"] < best_thresh, agent_preds, base_preds)
+    final_hybrid = np.where(conf_test_1d < best_thresh, agent_preds, base_preds)
     acc_hybrid = accuracy_score(y_test, final_hybrid)
     
     print(f"Base CNN Accuracy: {acc_base*100:.2f}%")
     print(f"Hybrid Accuracy (Thresh={best_thresh:.2f}): {acc_hybrid*100:.2f}%")
     
     # Calculate ROC on Agent Probabilities for Hybrid
-    hybrid_proba = np.where((df_ag_test["confidence"] < best_thresh)[:, None], agent_preds_proba, pred_test)
+    hybrid_proba = np.where((conf_test_1d < best_thresh)[:, None], agent_preds_proba, pred_test)
     auc_val = plot_roc(y_test, hybrid_proba, "Unified_Test", args.save_dir)
     
     metrics = {

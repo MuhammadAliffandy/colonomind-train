@@ -154,9 +154,12 @@ class CosineAnnealingWarmRestarts(Callback):
         self.T_i = T_0
     
     def on_epoch_begin(self, epoch, logs=None):
-        lr = self.lr_min + 0.5 * (self.lr_max - self.lr_min) * \
-             (1 + math.cos(math.pi * self.T_cur / self.T_i))
-        tf.keras.backend.set_value(self.model.optimizer.learning_rate, lr)
+        lr = float(self.lr_min + 0.5 * (self.lr_max - self.lr_min) * \
+             (1 + math.cos(math.pi * self.T_cur / self.T_i)))
+        if hasattr(self.model.optimizer, 'learning_rate') and hasattr(self.model.optimizer.learning_rate, 'assign'):
+            self.model.optimizer.learning_rate.assign(lr)
+        else:
+            self.model.optimizer.learning_rate = lr
         self.T_cur += 1
         if self.T_cur >= self.T_i:
             self.T_cur = 0

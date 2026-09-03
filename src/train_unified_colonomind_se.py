@@ -524,7 +524,8 @@ def main():
         model.compile(optimizer=Adam(1e-3),
                       loss='categorical_crossentropy', metrics=['accuracy'])
         model.fit(train_gen, validation_data=val_gen,
-                  epochs=args.epochs_warmup, class_weight=cw_dict)
+                  epochs=args.epochs_warmup, class_weight=cw_dict,
+                  use_multiprocessing=True, workers=16)
 
         # Phase 2: Partial unfreeze (last 40%)
         print("\n" + "=" * 70)
@@ -546,7 +547,8 @@ def main():
             EarlyStopping(patience=12, restore_best_weights=True, monitor='val_accuracy', mode='max')
         ]
         model.fit(train_gen, validation_data=val_gen,
-                  epochs=args.epochs_partial, class_weight=cw_dict, callbacks=cb2)
+                  epochs=args.epochs_partial, class_weight=cw_dict, callbacks=cb2,
+                  use_multiprocessing=True, workers=16)
 
         # Phase 3: Full fine-tune
         print("\n" + "=" * 70)
@@ -563,7 +565,8 @@ def main():
             EarlyStopping(patience=15, restore_best_weights=True, monitor='val_accuracy', mode='max')
         ]
         history = model.fit(train_gen, validation_data=val_gen,
-                            epochs=args.epochs_full, class_weight=cw_dict, callbacks=cb3)
+                            epochs=args.epochs_full, class_weight=cw_dict, callbacks=cb3,
+                            use_multiprocessing=True, workers=16)
         plot_history(history, args.save_dir)
         model = load_model(model_path, custom_objects={'OrdinalFocalLoss': OrdinalFocalLoss})
         gc.collect()

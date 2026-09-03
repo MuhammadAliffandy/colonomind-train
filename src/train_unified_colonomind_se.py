@@ -221,8 +221,6 @@ class HybridGenerator(Sequence):
 
         for i, idx in enumerate(idxs):
             img = self.imgs[idx]
-            img = cv2.resize(img, IMG_SIZE)
-            img = apply_clahe(img)  # Enhance vascular patterns
             if self.augment:
                 img = apply_heavy_augmentation(img)
             X_img[i] = img / 255.0
@@ -312,13 +310,16 @@ def load_unified_data(base_dir):
     all_paths = tp + np_ + lp
     all_patients = [extract_patient_id(p) for p in all_paths]
 
-    # Extract clinical colour features for each image
-    print("Extracting clinical colour features...")
+    # Extract clinical colour features and pre-process all images (resize + CLAHE) to save CPU during training
+    print("Extracting clinical colour features and caching CLAHE images in RAM...")
     colour_feats = []
-    for img in tqdm(all_imgs, desc="Colour features"):
+    processed_imgs = []
+    for img in tqdm(all_imgs, desc="Colour features & CLAHE"):
         img_resized = cv2.resize(img, IMG_SIZE)
         img_clahe = apply_clahe(img_resized)
         colour_feats.append(extract_clinical_colour_features(img_clahe))
+        processed_imgs.append(img_clahe)
+    all_imgs = processed_imgs
     colour_feats = np.array(colour_feats)
     
     # Combine: 20 (wavelet+GLCM) + 8 (clinical colour) = 28
@@ -361,8 +362,7 @@ def predict_with_tta(model, imgs, feats, umaps, n_aug=8):
     for aug_i in range(n_aug + 1):
         batch_imgs = np.empty((len(imgs), *IMG_SIZE, 3), dtype=np.float32)
         for i, img in enumerate(imgs):
-            img_r = cv2.resize(img, IMG_SIZE)
-            img_r = apply_clahe(img_r)
+            img_r = img.copy()  # Already 384x384 and CLAHE-applied from load_unified_data
             if aug_i > 0:
                 img_r = apply_heavy_augmentation(img_r)
             batch_imgs[i] = img_r / 255.0
@@ -524,8 +524,7 @@ def main():
         model.compile(optimizer=Adam(1e-3),
                       loss='categorical_crossentropy', metrics=['accuracy'])
         model.fit(train_gen, validation_data=val_gen,
-                  epochs=args.epochs_warmup, class_weight=cw_dict,
-                  use_multiprocessing=True, workers=16)
+                  epochs=args.epochs_warmup, class_weight=cw_dict)
 
         # Phase 2: Partial unfreeze (last 40%)
         print("\n" + "=" * 70)
@@ -547,8 +546,7 @@ def main():
             EarlyStopping(patience=12, restore_best_weights=True, monitor='val_accuracy', mode='max')
         ]
         model.fit(train_gen, validation_data=val_gen,
-                  epochs=args.epochs_partial, class_weight=cw_dict, callbacks=cb2,
-                  use_multiprocessing=True, workers=16)
+                  epochs=args.epochs_partial, class_weight=cw_dict, callbacks=cb2)
 
         # Phase 3: Full fine-tune
         print("\n" + "=" * 70)
@@ -565,8 +563,7 @@ def main():
             EarlyStopping(patience=15, restore_best_weights=True, monitor='val_accuracy', mode='max')
         ]
         history = model.fit(train_gen, validation_data=val_gen,
-                            epochs=args.epochs_full, class_weight=cw_dict, callbacks=cb3,
-                            use_multiprocessing=True, workers=16)
+                            epochs=args.epochs_full, class_weight=cw_dict, callbacks=cb3)
         plot_history(history, args.save_dir)
         model = load_model(model_path, custom_objects={'OrdinalFocalLoss': OrdinalFocalLoss})
         gc.collect()

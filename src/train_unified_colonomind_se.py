@@ -194,49 +194,47 @@ def apply_heavy_augmentation(img):
 # ==============================================================================
 # GENERATOR with MixUp + CLAHE
 # ==============================================================================
-class HybridGenerator(Sequence):
-    def __init__(self, imgs, feats, umaps, labels, batch_size=12,
-                 shuffle=True, augment=False, mixup_alpha=0.0):
-        self.imgs = imgs
-        self.feats = feats
-        self.umaps = umaps
-        self.labels_raw = labels
-        self.labels = to_categorical(labels, num_classes=NUM_CLASSES)
-        self.batch_size = batch_size
-        self.shuffle = shuffle
-        self.augment = augment
-        self.mixup_alpha = mixup_alpha
-        self.indexes = np.arange(len(self.imgs))
-        super().__init__()
+def create_tf_dataset(imgs, feats, umaps, labels, batch_size=12, is_training=True, mixup_alpha=0.2):
+    # Convert to GPU-ready tensors
+    print(f"Loading {len(imgs)} images to RAM for tf.data...")
+    X_img = np.stack(imgs).astype(np.float32) / 255.0
+    y = to_categorical(labels, num_classes=NUM_CLASSES).astype(np.float32)
+    feats = feats.astype(np.float32)
+    umaps = umaps.astype(np.float32)
 
-    def __len__(self): return int(np.floor(len(self.imgs) / self.batch_size))
-
-    def __getitem__(self, index):
-        idxs = self.indexes[index*self.batch_size:(index+1)*self.batch_size]
-        bs = len(idxs)
-        X_img = np.empty((bs, *IMG_SIZE, 3), dtype=np.float32)
-        X_feat = self.feats[idxs].copy()
-        X_umap = self.umaps[idxs].copy()
-        y = self.labels[idxs].copy()
-
-        for i, idx in enumerate(idxs):
-            img = self.imgs[idx]
-            if self.augment:
-                img = apply_heavy_augmentation(img)
-            X_img[i] = img / 255.0
-
-        if self.augment and self.mixup_alpha > 0:
-            lam = np.random.beta(self.mixup_alpha, self.mixup_alpha)
-            perm = np.random.permutation(bs)
-            X_img = lam * X_img + (1 - lam) * X_img[perm]
-            X_feat = lam * X_feat + (1 - lam) * X_feat[perm]
-            X_umap = lam * X_umap + (1 - lam) * X_umap[perm]
-            y = lam * y + (1 - lam) * y[perm]
-
-        return tuple((X_img, X_feat, X_umap)), y
-
-    def on_epoch_end(self):
-        if self.shuffle: np.random.shuffle(self.indexes)
+    ds = tf.data.Dataset.from_tensor_slices(((X_img, feats, umaps), y))
+    
+    if is_training:
+        ds = ds.shuffle(buffer_size=min(10000, len(imgs)))
+        
+        def augment(inputs, label):
+            img, feat, umap = inputs
+            img = tf.image.random_flip_left_right(img)
+            img = tf.image.random_flip_up_down(img)
+            img = tf.image.random_brightness(img, max_delta=0.2)
+            img = tf.image.random_contrast(img, lower=0.8, upper=1.2)
+            img = tf.clip_by_value(img, 0.0, 1.0)
+            return (img, feat, umap), label
+            
+        ds = ds.map(augment, num_parallel_calls=tf.data.AUTOTUNE)
+        
+    ds = ds.batch(batch_size, drop_remainder=False)
+    
+    if is_training and mixup_alpha > 0:
+        ds2 = ds.shuffle(100)
+        def mixup(b1, b2):
+            (x1_img, x1_feat, x1_umap), y1 = b1
+            (x2_img, x2_feat, x2_umap), y2 = b2
+            lam = tf.random.uniform([], minval=0.0, maxval=mixup_alpha)
+            x_img = lam * x1_img + (1.0 - lam) * x2_img
+            x_feat = lam * x1_feat + (1.0 - lam) * x2_feat
+            x_umap = lam * x1_umap + (1.0 - lam) * x2_umap
+            y = lam * y1 + (1.0 - lam) * y2
+            return (x_img, x_feat, x_umap), y
+            
+        ds = tf.data.Dataset.zip((ds, ds2)).map(mixup, num_parallel_calls=tf.data.AUTOTUNE)
+        
+    return ds.prefetch(tf.data.AUTOTUNE)
 
 # ==============================================================================
 # MODEL
@@ -492,12 +490,12 @@ def main():
     va_imgs = [all_imgs[i] for i in val_df['idx'].values]
     te_imgs = [all_imgs[i] for i in test_df['idx'].values]
 
-    train_gen = HybridGenerator(tr_imgs, Xtr_s, Utr, train_df['label'].values,
-                                batch_size=BATCH_SIZE, shuffle=True, augment=True, mixup_alpha=0.2)
-    val_gen = HybridGenerator(va_imgs, Xva_s, Uva, val_df['label'].values,
-                              batch_size=BATCH_SIZE, shuffle=False, augment=False)
-    test_gen = HybridGenerator(te_imgs, Xte_s, Ute, test_df['label'].values,
-                               batch_size=BATCH_SIZE, shuffle=False, augment=False)
+    train_gen = create_tf_dataset(tr_imgs, Xtr_s, Utr, train_df['label'].values,
+                                  batch_size=BATCH_SIZE, is_training=True, mixup_alpha=0.2)
+    val_gen = create_tf_dataset(va_imgs, Xva_s, Uva, val_df['label'].values,
+                                batch_size=BATCH_SIZE, is_training=False, mixup_alpha=0.0)
+    test_gen = create_tf_dataset(te_imgs, Xte_s, Ute, test_df['label'].values,
+                                 batch_size=BATCH_SIZE, is_training=False, mixup_alpha=0.0)
 
     # Class weights (auto-balanced + extra for MES1)
     y_ints = train_df['label'].values
@@ -574,8 +572,7 @@ def main():
     print("=" * 70)
 
     y_true, y_pred_std, y_proba_std = [], [], []
-    for i in tqdm(range(len(test_gen)), desc="Standard eval"):
-        inp, lab = test_gen[i]
+    for inp, lab in tqdm(test_gen, desc="Standard eval"):
         preds = model.predict_on_batch(inp)
         y_true.extend(np.argmax(lab, axis=1))
         y_pred_std.extend(np.argmax(preds, axis=1))
@@ -623,8 +620,7 @@ def main():
             d = np.load(cache_file)
             return d['deep'], d['probs'], d['trues']
         deep, probs, trues = [], [], []
-        for i in tqdm(range(len(gen)), desc=f"Extract {name}"):
-            inp, y = gen[i]
+        for inp, y in tqdm(gen, desc=f"Extract {name}"):
             deep.append(feat_ext.predict_on_batch(inp))
             probs.append(model.predict_on_batch(inp))
             trues.extend(np.argmax(y, axis=1))

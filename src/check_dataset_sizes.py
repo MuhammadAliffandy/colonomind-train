@@ -1,50 +1,55 @@
 import os
-from collections import Counter
-from dgx_dataloader import load_all_images, load_tmc_ucm
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder
 
-def count_dataset(name, labels):
-    counter = Counter(labels)
-    total = len(labels)
-    print(f"\n[{name}] Total Test Images: {total}")
-    print(f"  - MES 0: {counter.get('MES0', 0)}")
-    print(f"  - MES 1: {counter.get('MES1', 0)}")
-    print(f"  - MES 2: {counter.get('MES2', 0)}")
-    print(f"  - MES 3: {counter.get('MES3', 0)}")
-    
+def count_raw_files(base_path, class_folders):
+    counts = {}
+    total = 0
+    for cls_folder in class_folders:
+        dir_path = os.path.join(base_path, cls_folder)
+        if os.path.exists(dir_path):
+            # Only count actual image files (ignoring hidden files)
+            files = [f for f in os.listdir(dir_path) if f.endswith(('.jpg', '.jpeg', '.png', '.bmp')) and not f.startswith('.')]
+            counts[cls_folder] = len(files)
+            total += len(files)
+        else:
+            counts[cls_folder] = 0
+            print(f"  [Warning] Directory not found: {dir_path}")
+    return counts, total
+
 def main():
-    base_dir = ".." # Adjust if you run this from outside src/
+    base_dir = ".." # Adjust if needed
     
-    # 1. TMC-UCM (Test Split directly loaded)
-    print("Loading TMC-UCM...")
-    try:
-        _, _, tmc_labels, _ = load_tmc_ucm(f'{base_dir}/Dataset/TMC-UCM', split_filter='Test')
-        count_dataset("TMC-UCM", tmc_labels)
-    except Exception as e:
-        print(f"Error loading TMC-UCM: {e}")
-        
-    # 2. NTUH (20% Test Split)
-    print("\nLoading NTUH...")
-    try:
-        ntuh_paths = [f'{base_dir}/Dataset+Code/MES classification_20250313', f'{base_dir}/Dataset+Code/MES classification_20250724']
-        _, _, ntuh_labels_all, _ = load_all_images(ntuh_paths, 'NTUH')
-        _, _, _, _, _, ntuh_test_labels, _, _ = train_test_split(
-            range(len(ntuh_labels_all)), range(len(ntuh_labels_all)), ntuh_labels_all, range(len(ntuh_labels_all)), 
-            test_size=0.2, random_state=42, stratify=ntuh_labels_all
-        )
-        count_dataset("NTUH", ntuh_test_labels)
-    except Exception as e:
-        print(f"Error loading NTUH: {e}")
-        
+    print("========================================")
+    print("📊 RAW DATASET COUNTER (BYPASSING CACHE)")
+    print("========================================\n")
+    
+    # 1. TMC-UCM Test
+    tmc_base = os.path.join(base_dir, 'Dataset', 'TMC-UCM', 'Test')
+    tmc_counts, tmc_total = count_raw_files(tmc_base, ['MES0', 'MES1', 'MES2', 'MES3'])
+    print(f"[TMC-UCM] Total Test Images: {tmc_total}")
+    for k, v in tmc_counts.items(): print(f"  - {k}: {v}")
+    
+    # 2. NTUH (20% of Total)
+    print("\n[NTUH] (Note: This is Total. Test split will be 20% of this)")
+    ntuh_paths = [
+        os.path.join(base_dir, 'Dataset+Code', 'MES classification_20250313'),
+        os.path.join(base_dir, 'Dataset+Code', 'MES classification_20250724')
+    ]
+    ntuh_total = 0
+    ntuh_combined_counts = {'MES0': 0, 'MES1': 0, 'MES2': 0, 'MES3': 0}
+    for p in ntuh_paths:
+        counts, tot = count_raw_files(p, ['MES0', 'MES1', 'MES2', 'MES3'])
+        ntuh_total += tot
+        for k in counts: ntuh_combined_counts[k] += counts[k]
+    
+    print(f"[NTUH] Total Images (All Splits): {ntuh_total}")
+    for k, v in ntuh_combined_counts.items(): print(f"  - {k}: {v}")
+    print(f"  --> Expected Test Size (20%): {int(ntuh_total * 0.2)}")
+    
     # 3. LIMUC
-    print("\nLoading LIMUC...")
-    try:
-        limuc_paths = [f'{base_dir}/Dataset/LIMUC/test_set']
-        _, _, limuc_test_labels, _ = load_all_images(limuc_paths, 'LIMUC')
-        count_dataset("LIMUC", limuc_test_labels)
-    except Exception as e:
-        print(f"Error loading LIMUC: {e}")
-        
+    limuc_base = os.path.join(base_dir, 'Dataset', 'LIMUC', 'test_set')
+    limuc_counts, limuc_total = count_raw_files(limuc_base, ['Mayo 0', 'Mayo 1', 'Mayo 2', 'Mayo 3'])
+    print(f"\n[LIMUC] Total Test Images: {limuc_total}")
+    for k, v in limuc_counts.items(): print(f"  - {k}: {v}")
+
 if __name__ == "__main__":
     main()

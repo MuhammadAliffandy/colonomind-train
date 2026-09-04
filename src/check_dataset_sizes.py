@@ -14,6 +14,8 @@ def count_raw_files(base_path, class_folders):
         else:
             counts[cls_folder] = 0
             print(f"  [Warning] Directory not found: {dir_path}")
+    return counts, total
+
 def count_txt_file(txt_path):
     counts = {'MES0': 0, 'MES1': 0, 'MES2': 0, 'MES3': 0}
     total = 0

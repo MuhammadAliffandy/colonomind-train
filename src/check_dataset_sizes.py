@@ -1,4 +1,5 @@
 import os
+import argparse
 
 def count_raw_files(base_path, class_folders):
     counts = {}
@@ -16,7 +17,11 @@ def count_raw_files(base_path, class_folders):
     return counts, total
 
 def main():
-    base_dir = ".." # Adjust if needed
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--base_dir", type=str, default="/raid/D13K48009/Clara/new_drive", help="Path to the new drive dataset folder")
+    args = parser.parse_args()
+    
+    base_dir = args.base_dir
     
     print("========================================")
     print("📊 RAW DATASET COUNTER (BYPASSING CACHE)")

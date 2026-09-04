@@ -14,6 +14,24 @@ def count_raw_files(base_path, class_folders):
         else:
             counts[cls_folder] = 0
             print(f"  [Warning] Directory not found: {dir_path}")
+def count_txt_file(txt_path):
+    counts = {'MES0': 0, 'MES1': 0, 'MES2': 0, 'MES3': 0}
+    total = 0
+    if not os.path.exists(txt_path):
+        print(f"  [Warning] Text file not found: {txt_path}")
+        return counts, total
+        
+    with open(txt_path, 'r') as f:
+        for line in f:
+            line = line.strip().upper()
+            if not line: continue
+            if 'MES0' in line: counts['MES0'] += 1
+            elif 'MES1' in line: counts['MES1'] += 1
+            elif 'MES2' in line: counts['MES2'] += 1
+            elif 'MES3' in line: counts['MES3'] += 1
+            total += 1
+    return counts, total
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--base_dir", type=str, default="/raid/D13K48009/Clara/new_drive", help="Path to the new drive dataset folder")
@@ -25,17 +43,19 @@ def main():
     print("📊 FULL DATASET COUNTER (ALL SPLITS)")
     print("========================================\n")
     
-    # 1. TMC-UCM (Train, Val, Test)
+    # 1. TMC-UCM (Parse from txt files)
     print("[1] TMC-UCM")
-    tmc_splits = ['Train', 'Val', 'Test']
+    tmc_splits = ['train.txt', 'test.txt']
     tmc_total_all = 0
     tmc_combined = {'MES0': 0, 'MES1': 0, 'MES2': 0, 'MES3': 0}
+    tmc_base = os.path.join(base_dir, 'Dataset', 'TMC-UCM')
+    
     for split in tmc_splits:
-        base = os.path.join(base_dir, 'Dataset', 'TMC-UCM', split)
-        counts, tot = count_raw_files(base, ['MES0', 'MES1', 'MES2', 'MES3'])
+        txt_path = os.path.join(tmc_base, split)
+        counts, tot = count_txt_file(txt_path)
         tmc_total_all += tot
         for k in counts: tmc_combined[k] += counts[k]
-        print(f"  - {split} Split: {tot} images")
+        print(f"  - {split}: {tot} images")
     print(f"  => TOTAL TMC-UCM: {tmc_total_all} images")
     for k, v in tmc_combined.items(): print(f"     {k}: {v}")
     

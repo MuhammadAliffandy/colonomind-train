@@ -14,8 +14,6 @@ def count_raw_files(base_path, class_folders):
         else:
             counts[cls_folder] = 0
             print(f"  [Warning] Directory not found: {dir_path}")
-    return counts, total
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--base_dir", type=str, default="/raid/D13K48009/Clara/new_drive", help="Path to the new drive dataset folder")
@@ -24,37 +22,52 @@ def main():
     base_dir = args.base_dir
     
     print("========================================")
-    print("📊 RAW DATASET COUNTER (BYPASSING CACHE)")
+    print("📊 FULL DATASET COUNTER (ALL SPLITS)")
     print("========================================\n")
     
-    # 1. TMC-UCM Test
-    tmc_base = os.path.join(base_dir, 'Dataset', 'TMC-UCM', 'Test')
-    tmc_counts, tmc_total = count_raw_files(tmc_base, ['MES0', 'MES1', 'MES2', 'MES3'])
-    print(f"[TMC-UCM] Total Test Images: {tmc_total}")
-    for k, v in tmc_counts.items(): print(f"  - {k}: {v}")
+    # 1. TMC-UCM (Train, Val, Test)
+    print("[1] TMC-UCM")
+    tmc_splits = ['Train', 'Val', 'Test']
+    tmc_total_all = 0
+    tmc_combined = {'MES0': 0, 'MES1': 0, 'MES2': 0, 'MES3': 0}
+    for split in tmc_splits:
+        base = os.path.join(base_dir, 'Dataset', 'TMC-UCM', split)
+        counts, tot = count_raw_files(base, ['MES0', 'MES1', 'MES2', 'MES3'])
+        tmc_total_all += tot
+        for k in counts: tmc_combined[k] += counts[k]
+        print(f"  - {split} Split: {tot} images")
+    print(f"  => TOTAL TMC-UCM: {tmc_total_all} images")
+    for k, v in tmc_combined.items(): print(f"     {k}: {v}")
     
-    # 2. NTUH (20% of Total)
-    print("\n[NTUH] (Note: This is Total. Test split will be 20% of this)")
+    # 2. NTUH
+    print("\n[2] NTUH")
     ntuh_paths = [
         os.path.join(base_dir, 'Dataset+Code', 'MES classification_20250313'),
         os.path.join(base_dir, 'Dataset+Code', 'MES classification_20250724')
     ]
-    ntuh_total = 0
-    ntuh_combined_counts = {'MES0': 0, 'MES1': 0, 'MES2': 0, 'MES3': 0}
+    ntuh_total_all = 0
+    ntuh_combined = {'MES0': 0, 'MES1': 0, 'MES2': 0, 'MES3': 0}
     for p in ntuh_paths:
         counts, tot = count_raw_files(p, ['MES0', 'MES1', 'MES2', 'MES3'])
-        ntuh_total += tot
-        for k in counts: ntuh_combined_counts[k] += counts[k]
-    
-    print(f"[NTUH] Total Images (All Splits): {ntuh_total}")
-    for k, v in ntuh_combined_counts.items(): print(f"  - {k}: {v}")
-    print(f"  --> Expected Test Size (20%): {int(ntuh_total * 0.2)}")
+        ntuh_total_all += tot
+        for k in counts: ntuh_combined[k] += counts[k]
+        print(f"  - Folder {os.path.basename(p)}: {tot} images")
+    print(f"  => TOTAL NTUH: {ntuh_total_all} images")
+    for k, v in ntuh_combined.items(): print(f"     {k}: {v}")
     
     # 3. LIMUC
-    limuc_base = os.path.join(base_dir, 'Dataset', 'LIMUC', 'test_set')
-    limuc_counts, limuc_total = count_raw_files(limuc_base, ['Mayo 0', 'Mayo 1', 'Mayo 2', 'Mayo 3'])
-    print(f"\n[LIMUC] Total Test Images: {limuc_total}")
-    for k, v in limuc_counts.items(): print(f"  - {k}: {v}")
+    print("\n[3] LIMUC")
+    limuc_splits = ['train_and_validation_sets', 'test_set']
+    limuc_total_all = 0
+    limuc_combined = {'Mayo 0': 0, 'Mayo 1': 0, 'Mayo 2': 0, 'Mayo 3': 0}
+    for split in limuc_splits:
+        base = os.path.join(base_dir, 'Dataset', 'LIMUC', split)
+        counts, tot = count_raw_files(base, ['Mayo 0', 'Mayo 1', 'Mayo 2', 'Mayo 3'])
+        limuc_total_all += tot
+        for k in counts: limuc_combined[k] += counts[k]
+        print(f"  - {split}: {tot} images")
+    print(f"  => TOTAL LIMUC: {limuc_total_all} images")
+    for k, v in limuc_combined.items(): print(f"     {k.replace('Mayo ', 'MES')}: {v}")
 
 if __name__ == "__main__":
     main()

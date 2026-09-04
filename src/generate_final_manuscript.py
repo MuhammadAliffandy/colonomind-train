@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import joblib
 from collections import Counter
-from sklearn.metrics import confusion_matrix, accuracy_score, cohen_kappa_score, roc_curve, auc
+from sklearn.metrics import confusion_matrix, accuracy_score, cohen_kappa_score, roc_curve, auc, precision_score, recall_score, f1_score
 from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import train_test_split
 from tensorflow.keras.models import load_model
@@ -85,24 +85,34 @@ def calc_secondary_metrics(y_true, y_pred, num_classes=4):
         metrics[i] = {'Sensitivity': sens, 'Specificity': spec, 'PPV': ppv, 'NPV': npv, 'F1': f1}
     return metrics
 
-def bootstrap_metric(y_true, y_pred, metric_func, n_iterations=1000):
-    scores = []
+def bootstrap_all_metrics(y_true, y_pred, n_iterations=1000):
     n_size = int(len(y_true))
+    metrics_list = []
     for i in range(n_iterations):
         indices = np.random.randint(0, n_size, n_size)
+        yt, yp = y_true[indices], y_pred[indices]
         try:
-            score = metric_func(y_true[indices], y_pred[indices])
-            if not np.isnan(score):
-                scores.append(score)
+            acc = accuracy_score(yt, yp) * 100
+            prec = precision_score(yt, yp, average='macro', zero_division=0) * 100
+            rec = recall_score(yt, yp, average='macro', zero_division=0) * 100
+            f1 = f1_score(yt, yp, average='macro', zero_division=0) * 100
+            qwk = cohen_kappa_score(yt, yp, weights='quadratic')
+            if not np.isnan(qwk):
+                metrics_list.append((acc, prec, rec, f1, qwk))
         except:
             continue
-    if len(scores) == 0:
-        return 0.0, 0.0, 0.0
-    scores.sort()
-    lower = scores[int(0.025 * len(scores))]
-    upper = scores[int(0.975 * len(scores))]
-    mean_score = np.mean(scores)
-    return mean_score, lower, upper
+    if len(metrics_list) == 0:
+        return [0]*5, [0]*5, [0]*5
+    
+    metrics_arr = np.array(metrics_list)
+    means = np.mean(metrics_arr, axis=0)
+    lowers = []
+    uppers = []
+    for col in range(5):
+        sorted_col = np.sort(metrics_arr[:, col])
+        lowers.append(sorted_col[int(0.025 * len(sorted_col))])
+        uppers.append(sorted_col[int(0.975 * len(sorted_col))])
+    return means, lowers, uppers
 
 def compute_macro_roc(y_true, y_proba, num_classes=4):
     y_true_cat = to_categorical(y_true, num_classes=num_classes)
@@ -135,27 +145,41 @@ def draw_confusion_matrix(y_true, y_pred, dataset_name, save_dir):
     plt.close()
     print(f"  ✅ Saved CM for {dataset_name}")
 
-def plot_roc_figure(dataset_name, y_true, model_probas, save_dir):
-    plt.figure(figsize=(10, 8))
-    colors = sns.color_palette("husl", len(model_probas))
+def plot_combined_roc_panels(all_roc_data, save_dir):
+    fig, axes = plt.subplots(2, 2, figsize=(16, 14))
+    axes = axes.flatten()
     
-    for (model_name, y_proba), color in zip(model_probas.items(), colors):
-        fpr, tpr, auc_score = compute_macro_roc(y_true, y_proba)
-        plt.plot(fpr, tpr, color=color, lw=2, label=f'{model_name} (AUC = {auc_score:.3f})')
+    dataset_order = ['NTUH', 'TMC-UCM', 'LIMUC', 'Unified']
+    
+    for i, dataset_name in enumerate(dataset_order):
+        ax = axes[i]
+        if dataset_name not in all_roc_data:
+            ax.set_title(f"No Data for {dataset_name}")
+            continue
+            
+        model_probas = all_roc_data[dataset_name]['probas']
+        y_true = all_roc_data[dataset_name]['y_true']
         
-    plt.plot([0, 1], [0, 1], 'k--', lw=2)
-    plt.xlim([0.0, 1.0])
-    plt.ylim([0.0, 1.05])
-    plt.xlabel('False Positive Rate', fontsize=14)
-    plt.ylabel('True Positive Rate', fontsize=14)
-    plt.title(f'Macro-average ROC Curve - {dataset_name}', fontsize=16)
-    plt.legend(loc="lower right", fontsize=12)
-    plt.grid(True)
-    
-    out_path = os.path.join(save_dir, f'Fig_6_ROC_{dataset_name}.png')
+        colors = sns.color_palette("husl", len(model_probas))
+        
+        for (model_name, y_proba), color in zip(model_probas.items(), colors):
+            fpr, tpr, auc_score = compute_macro_roc(y_true, y_proba)
+            ax.plot(fpr, tpr, color=color, lw=2, label=f'{model_name} (AUC = {auc_score:.3f})')
+            
+        ax.plot([0, 1], [0, 1], 'k--', lw=2)
+        ax.set_xlim([0.0, 1.0])
+        ax.set_ylim([0.0, 1.05])
+        ax.set_xlabel('False Positive Rate', fontsize=12)
+        ax.set_ylabel('True Positive Rate', fontsize=12)
+        ax.set_title(dataset_name, fontsize=14, fontweight='bold')
+        ax.legend(loc="lower right", fontsize=10)
+        ax.grid(True, linestyle='--', alpha=0.7)
+        
+    plt.tight_layout()
+    out_path = os.path.join(save_dir, 'Fig_2_ROC_Combined_4Panels.png')
     retry_io(lambda: plt.savefig(out_path, bbox_inches='tight', dpi=300))
     plt.close()
-    print(f"  ✅ Saved ROC for {dataset_name}")
+    print(f"✅ Saved Combined ROC Grid to {out_path}")
 
 def get_coverage_curve_data(y_true, y_pred, confidences, n_iterations=100, step=0.05):
     sorted_indices = np.argsort(confidences)[::-1]
@@ -282,7 +306,13 @@ def main():
     print(f"📁 Final results will be saved to: {save_dir}")
     
     model_names = ['ResNet-50', 'DenseNet-121', 'EfficientNet-B4', 'ConvNeXt-Tiny', 'ViT-B-16']
-    datasets = ['TMC-UCM', 'NTUH', 'LIMUC', 'Unified']
+    datasets = ['NTUH', 'TMC-UCM', 'LIMUC', 'Unified']
+    
+    # Global structure for the 4 manuscript tables
+    manuscript_tables = {d: [] for d in datasets}
+    
+    # For Combined ROC Panels
+    all_roc_data = {}
     
     # Store results to compile tables at the end
     results_primary = {m: {} for m in model_names}
@@ -383,25 +413,17 @@ def main():
             all_hybrid_preds.append(hybrid_preds)
             model_probas_dict[model_name] = hybrid_proba
             
-            # -- Primary Metrics (Table 1 & 2) --
-            acc_func = lambda yt, yp: accuracy_score(yt, yp)
-            acc_mean, acc_low, acc_high = bootstrap_metric(y_true, hybrid_preds, acc_func)
+            # -- Primary Metrics (Manuscript Tables) --
+            means, lows, highs = bootstrap_all_metrics(y_true, hybrid_preds)
             
-            qwk_func = lambda yt, yp: cohen_kappa_score(yt, yp, weights='quadratic')
-            qwk_mean, qwk_low, qwk_high = bootstrap_metric(y_true, hybrid_preds, qwk_func)
-            
-            results_primary[model_name][d] = {
-                'Acc': f"{acc_mean:.3f} ({acc_low:.3f}-{acc_high:.3f})",
-                'QWK': f"{qwk_mean:.3f} ({qwk_low:.3f}-{qwk_high:.3f})"
-            }
-            
-            for cls_idx, cls_name in enumerate(['MES 0', 'MES 1', 'MES 2', 'MES 3']):
-                cls_mask = y_true == cls_idx
-                if np.sum(cls_mask) > 0:
-                    acc_cls_mean, acc_cls_low, acc_cls_high = bootstrap_metric(y_true[cls_mask], hybrid_preds[cls_mask], acc_func)
-                    results_per_class[model_name][cls_name][d] = f"{acc_cls_mean:.3f} ({acc_cls_low:.3f}-{acc_cls_high:.3f})"
-                else:
-                    results_per_class[model_name][cls_name][d] = "-"
+            manuscript_tables[d].append({
+                'Model': model_name,
+                'Accuracy (%)': f"{means[0]:.2f} ({lows[0]:.2f}-{highs[0]:.2f})",
+                'Precision (%)': f"{means[1]:.2f} ({lows[1]:.2f}-{highs[1]:.2f})",
+                'Recall (%)': f"{means[2]:.2f} ({lows[2]:.2f}-{highs[2]:.2f})",
+                'F1 (%)': f"{means[3]:.2f} ({lows[3]:.2f}-{highs[3]:.2f})",
+                'QWK': f"{means[4]:.4f} ({lows[4]:.4f}-{highs[4]:.4f})"
+            })
                     
             # -- Secondary Metrics (Tables 3-6) --
             sec_metrics = calc_secondary_metrics(y_true, hybrid_preds)
@@ -441,11 +463,11 @@ def main():
                             'Accuracy': successful_detects / total_instances
                         })
             
-            # -- Plot Fig 1-4: CM & Fig 6: ROC --
+            # -- Plot Fig 1a-d: CM & Collect ROC --
             avg_probas = np.mean(all_hybrid_probas, axis=0)
             sw_preds = np.argmax(avg_probas, axis=1)
             draw_confusion_matrix(y_true, sw_preds, d, save_dir)
-            plot_roc_figure(d, y_true, model_probas_dict, save_dir)
+            all_roc_data[d] = {'y_true': y_true, 'probas': model_probas_dict}
             
             # -- Fig 5b: Coverage curves --
             if d in ['TMC-UCM', 'NTUH', 'LIMUC']:
@@ -474,33 +496,20 @@ def main():
 
     print("\n📝 Compiling Tables...")
     
-    # Table 1: Primary Average
-    t1_rows = []
-    for m in model_names:
-        row = {'Model': m}
-        for d in datasets:
-            res = results_primary[m].get(d, {'Acc': '-', 'QWK': '-'})
-            row[f'{d} (Acc)'] = res['Acc']
-            row[f'{d} (QWK)'] = res['QWK']
-        t1_rows.append(row)
-    retry_io(lambda: pd.DataFrame(t1_rows).to_csv(os.path.join(save_dir, 'Table_1_Primary_Average.csv'), index=False))
+    for i, d in enumerate(['TMC-UCM', 'LIMUC', 'NTUH', 'Unified']):
+        # Actually the user requested them in order Table 1 (TMC), Table 2 (LIMUC), Table 3 (NTUH), Table 4 (Unified) based on screenshots?
+        # The screenshots show Table 1 TMC, Table 2 LIMUC, Table 3 NTUH, Table 4 Unified. I'll save them as such.
+        pass
+        
+    retry_io(lambda: pd.DataFrame(manuscript_tables['TMC-UCM']).to_csv(os.path.join(save_dir, 'Table_1_Performance_TMC-UCM.csv'), index=False))
+    retry_io(lambda: pd.DataFrame(manuscript_tables['LIMUC']).to_csv(os.path.join(save_dir, 'Table_2_Performance_LIMUC.csv'), index=False))
+    retry_io(lambda: pd.DataFrame(manuscript_tables['NTUH']).to_csv(os.path.join(save_dir, 'Table_3_Performance_NTUH.csv'), index=False))
+    retry_io(lambda: pd.DataFrame(manuscript_tables['Unified']).to_csv(os.path.join(save_dir, 'Table_4_Performance_Unified.csv'), index=False))
     
-    # Table 2: Primary Per Class
-    t2_rows = []
-    for m in model_names:
-        for c in ['MES 0', 'MES 1', 'MES 2', 'MES 3']:
-            row = {'Model': m, 'Class': c}
-            for d in datasets:
-                row[d] = results_per_class[m][c].get(d, '-')
-            t2_rows.append(row)
-    retry_io(lambda: pd.DataFrame(t2_rows).to_csv(os.path.join(save_dir, 'Table_2_Primary_PerClass.csv'), index=False))
+    print("  ✅ Manuscript Tables 1-4 saved")
     
-    # Secondary Tables
-    if table3_rows: retry_io(lambda: pd.DataFrame(table3_rows).to_csv(os.path.join(save_dir, 'Table_3_Secondary_NTUH.csv'), index=False))
-    if table4_rows: retry_io(lambda: pd.DataFrame(table4_rows).to_csv(os.path.join(save_dir, 'Table_4_Secondary_LIMUC.csv'), index=False))
-    if table5_rows: retry_io(lambda: pd.DataFrame(table5_rows).to_csv(os.path.join(save_dir, 'Table_5_Secondary_TMC-UCM.csv'), index=False))
-    if table6_rows: retry_io(lambda: pd.DataFrame(table6_rows).to_csv(os.path.join(save_dir, 'Table_6_Secondary_Unified.csv'), index=False))
-    if table7_data: retry_io(lambda: pd.DataFrame(table7_data).to_csv(os.path.join(save_dir, 'Table_7_Agreement_Thresholds.csv'), index=False))
+    print("📈 Generating Combined 2x2 ROC Panels...")
+    plot_combined_roc_panels(all_roc_data, save_dir)
     
     print("📈 Generating Coverage Plot...")
     plot_coverage_curves_combined(coverage_data_dict, save_dir)

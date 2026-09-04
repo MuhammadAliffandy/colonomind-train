@@ -88,7 +88,7 @@ def make_ci(val, metric_type="acc"):
         return f"{val:.2f}% ({(val-delta):.2f}%-{(val+delta):.2f}%)"
 
 def main():
-    save_dir = "../Manuscript_Mock_Results"
+    save_dir = "Manuscript_Mock_Results"
     os.makedirs(save_dir, exist_ok=True)
     
     # HARDCODED DATA FROM USER SCREENSHOT

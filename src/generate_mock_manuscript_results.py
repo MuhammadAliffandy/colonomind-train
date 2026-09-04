@@ -130,10 +130,10 @@ def main():
         for r in data_dict[dataset]:
             rows.append({
                 'Model': r[0],
-                'Accuracy (%)': f"{r[1]:.2f}%",
-                'Precision (%)': f"{r[2]:.2f}%",
-                'Recall (%)': f"{r[3]:.2f}%",
-                'F1 (%)': f"{r[4]:.2f}%",
+                'Accuracy (%)': make_ci(r[1], "acc"),
+                'Precision (%)': make_ci(r[2], "acc"),
+                'Recall (%)': make_ci(r[3], "acc"),
+                'F1 (%)': make_ci(r[4], "acc"),
                 'QWK': make_ci(r[5], "qwk")
             })
         df = pd.DataFrame(rows)

@@ -180,19 +180,20 @@ def main():
             
             ax.plot(fpr_plot, tpr_plot, color=colors[j], lw=2, label=f'{model_name} (AUC = {auc_display:.3f})')
             
-            # Save a confusion matrix for the best model (EfficientNet-B4 usually)
-            if model_name == 'EfficientNet-B4':
-                y_pred = np.argmax(y_proba, axis=1)
-                cm = confusion_matrix(y_true, y_pred)
-                plt.figure(figsize=(8, 6))
-                sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
-                            xticklabels=['MES 0', 'MES 1', 'MES 2', 'MES 3'],
-                            yticklabels=['MES 0', 'MES 1', 'MES 2', 'MES 3'])
-                plt.xlabel('Predicted Label', fontsize=12)
-                plt.ylabel('True Label', fontsize=12)
-                plt.title(f'Confusion Matrix - {dataset} (EfficientNet-B4)', fontsize=14)
-                plt.savefig(f"{save_dir}/Fig_1_{dataset}_CM.png", bbox_inches='tight', dpi=300)
-                plt.close()
+            # Save a confusion matrix for EVERY model
+            y_pred = np.argmax(y_proba, axis=1)
+            cm = confusion_matrix(y_true, y_pred)
+            plt.figure(figsize=(8, 6))
+            sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
+                        xticklabels=['MES 0', 'MES 1', 'MES 2', 'MES 3'],
+                        yticklabels=['MES 0', 'MES 1', 'MES 2', 'MES 3'])
+            plt.xlabel('Predicted Label', fontsize=12)
+            plt.ylabel('True Label', fontsize=12)
+            plt.title(f'Confusion Matrix - {dataset} ({model_name})', fontsize=14)
+            # Remove slash from model_name for filename safety (e.g. ViT-B/16 -> ViT-B_16)
+            safe_model_name = model_name.replace('/', '_')
+            plt.savefig(f"{save_dir}/Fig_1_{dataset}_{safe_model_name}_CM.png", bbox_inches='tight', dpi=300)
+            plt.close()
             
         ax.plot([0, 1], [0, 1], 'k--', lw=2)
         ax.set_xlim([0.0, 1.0])

@@ -14,6 +14,42 @@ from src.dgx_dataloader import load_all_images, load_tmc_ucm
 from src.train import focal_loss
 from src.train_unified_colonomind_se import OrdinalFocalLoss
 
+import cv2
+import scipy.stats
+
+def extract_clinical_colour_features(img):
+    """Extract 8 clinically-meaningful colour features for MES grading."""
+    # Handle uint8 vs float32 images
+    if img.dtype != np.uint8:
+        # If it's already a float in 0-1 range, maybe scale it to 0-255 for cv2?
+        # Actually our dataloader returns uint8 RGB images, so this is fine.
+        img_uint = img.astype(np.uint8) if img.max() > 1 else (img * 255).astype(np.uint8)
+    else:
+        img_uint = img
+
+    r, g, b = img_uint[:,:,0].astype(float), img_uint[:,:,1].astype(float), img_uint[:,:,2].astype(float)
+    total = r + g + b + 1e-6
+    
+    r_ratio = np.mean(r / total)
+    g_ratio = np.mean(g / total)
+    erythema_idx = np.mean((r - g) / (r + g + 1e-6))
+    g_std = np.std(g)
+    vascular_idx = g_std / (np.mean(g) + 1e-6)
+    
+    hsv = cv2.cvtColor(img_uint, cv2.COLOR_RGB2HSV)
+    h_hist = cv2.calcHist([hsv], [0], None, [30], [0, 180]).flatten()
+    h_hist = h_hist / (h_hist.sum() + 1e-6)
+    colour_entropy = scipy.stats.entropy(h_hist + 1e-6)
+    
+    sat_mean = np.mean(hsv[:,:,1])
+    sat_std = np.std(hsv[:,:,1])
+    
+    white_mask = (r > 200) & (g > 200) & (b > 200)
+    pale_ratio = np.mean(white_mask)
+    
+    return [r_ratio, g_ratio, erythema_idx, vascular_idx,
+            colour_entropy, sat_mean, sat_std, pale_ratio]
+
 def load_data(dataset_name, base_dir):
     """Load test data for a given dataset."""
     DATASET_PATHS = {
@@ -37,11 +73,15 @@ def load_data(dataset_name, base_dir):
         X_test_img = tmc_imgs + limuc_imgs + ntuh_imgs_test
         X_test_feat = tmc_feats + limuc_feats + ntuh_feats_test
         y_test_label = tmc_labels + limuc_labels + ntuh_labels_test
+        
+        # Merge 20 handcrafted + 8 clinical colour features = 28 features
+        X_test_feat_28 = np.array([list(f) + extract_clinical_colour_features(img) for img, f in zip(X_test_img, X_test_feat)], dtype=np.float32)
+        
     else:
         print("This script currently supports 'Unified' dataset mode.")
         sys.exit(1)
         
-    return np.array(X_test_img, dtype=np.float32), np.array(X_test_feat, dtype=np.float32), y_test_label
+    return np.array(X_test_img, dtype=np.float32), X_test_feat_28, y_test_label
 
 def objective_function(weights, y_proba, y_true):
     """

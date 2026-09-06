@@ -83,8 +83,8 @@ def main():
     print(f"📦 Dataset loaded: {len(X_img)} images")
     
     model_dir = os.path.dirname(args.model_path)
-    base_scaler_path = os.path.join(model_dir, "base_scaler.pkl")
-    umap_path = os.path.join(model_dir, "umap_model.pkl")
+    base_scaler_path = os.path.join(model_dir, "scaler_v4.pkl")
+    umap_path = os.path.join(model_dir, "umap_v4.pkl")
     
     print(f"🧠 Loading Model from {args.model_path} ...")
     

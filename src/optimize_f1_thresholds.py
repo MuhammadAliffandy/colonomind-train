@@ -11,6 +11,7 @@ from scipy.optimize import differential_evolution
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.dgx_dataloader import load_all_images, load_tmc_ucm
 from src.train import focal_loss
+from src.train_unified_colonomind_se import OrdinalFocalLoss
 
 def load_data(dataset_name, base_dir):
     """Load test data for a given dataset."""
@@ -79,8 +80,16 @@ def main():
     print(f"📦 Dataset loaded: {len(X_img)} images")
     
     print(f"🧠 Loading Model from {args.model_path} ...")
+    
+    custom_objs = {
+        'focal_loss_fixed': focal_loss(gamma=2.5, alpha=0.25),
+        'OrdinalFocalLoss': OrdinalFocalLoss,
+        'ordinal_focal_loss_1': OrdinalFocalLoss, # Kadang Keras menambahkan suffix saat save
+        'ordinal_focal_loss': OrdinalFocalLoss
+    }
+    
     try:
-        model = tf.keras.models.load_model(args.model_path, custom_objects={'focal_loss_fixed': focal_loss(gamma=2.5, alpha=0.25)})
+        model = tf.keras.models.load_model(args.model_path, custom_objects=custom_objs)
     except Exception as e:
         print(f"Failed to load model: {e}")
         return

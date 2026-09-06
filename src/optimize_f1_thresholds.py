@@ -50,8 +50,15 @@ def extract_clinical_colour_features(img):
     return [r_ratio, g_ratio, erythema_idx, vascular_idx,
             colour_entropy, sat_mean, sat_std, pale_ratio]
 
+def apply_clahe(img):
+    """Apply CLAHE to enhance mucosal texture and vascular patterns."""
+    lab = cv2.cvtColor(img, cv2.COLOR_RGB2LAB)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    lab[:,:,0] = clahe.apply(lab[:,:,0])
+    return cv2.cvtColor(lab, cv2.COLOR_LAB2RGB)
+
 def load_data(dataset_name, base_dir):
-    """Load test data for a given dataset."""
+    """Load test data for a given dataset (Raw images and 20 handcrafted features)."""
     DATASET_PATHS = {
         'NTUH':    [f'{base_dir}/Dataset+Code/MES classification_20250313', f'{base_dir}/Dataset+Code/MES classification_20250724'],
         'LIMUC':   [f'{base_dir}/Dataset/LIMUC/train_and_validation_sets', f'{base_dir}/Dataset/LIMUC/test_set'],
@@ -73,15 +80,11 @@ def load_data(dataset_name, base_dir):
         X_test_img = tmc_imgs + limuc_imgs + ntuh_imgs_test
         X_test_feat = tmc_feats + limuc_feats + ntuh_feats_test
         y_test_label = tmc_labels + limuc_labels + ntuh_labels_test
-        
-        # Merge 20 handcrafted + 8 clinical colour features = 28 features
-        X_test_feat_28 = np.array([list(f) + extract_clinical_colour_features(img) for img, f in zip(X_test_img, X_test_feat)], dtype=np.float32)
-        
     else:
         print("This script currently supports 'Unified' dataset mode.")
         sys.exit(1)
         
-    return np.array(X_test_img, dtype=np.float32), X_test_feat_28, y_test_label
+    return X_test_img, X_test_feat, y_test_label
 
 def objective_function(weights, y_proba, y_true):
     """
@@ -114,13 +117,13 @@ def main():
     args = parser.parse_args()
 
     print(f"🚀 Loading Unified Dataset from {args.base_dir} ...")
-    X_img, X_feat, y_labels = load_data('Unified', args.base_dir)
+    X_img_raw, X_feat_raw, y_labels = load_data('Unified', args.base_dir)
     
     le = LabelEncoder()
     le.fit(["MES0", "MES1", "MES2", "MES3"])
     y_true = le.transform(y_labels)
     
-    print(f"📦 Dataset loaded: {len(X_img)} images")
+    print(f"📦 Dataset loaded: {len(X_img_raw)} images")
     
     model_dir = os.path.dirname(args.model_path)
     base_scaler_path = os.path.join(model_dir, "scaler_v4.pkl")
@@ -141,22 +144,35 @@ def main():
         print(f"Failed to load model: {e}")
         return
 
+    expected_shape = model.input[0].shape[1:3] if isinstance(model.input, list) else model.input.shape[1:3]
+    
+    print(f"✂️ Preprocessing: Resizing to {expected_shape}, applying CLAHE, and extracting 8 Colour Features...")
+    X_img_processed = []
+    X_feat_28 = []
+    
+    for img, feat in zip(X_img_raw, X_feat_raw):
+        # Resize
+        img_resized = cv2.resize(img, (expected_shape[1], expected_shape[0]))
+        # CLAHE
+        img_clahe = apply_clahe(img_resized)
+        X_img_processed.append(img_clahe)
+        
+        # Colour features from CLAHE
+        colour_feats = extract_clinical_colour_features(img_clahe)
+        X_feat_28.append(list(feat) + colour_feats)
+        
+    X_img_array = np.array(X_img_processed, dtype=np.float32)
+    X_feat_array = np.array(X_feat_28, dtype=np.float32)
+
     print("📊 Loading tab scaler & UMAP reducer...")
     base_scaler = joblib.load(base_scaler_path)
     umap_reducer = joblib.load(umap_path)
     
-    X_feat_scaled = base_scaler.transform(X_feat)
+    X_feat_scaled = base_scaler.transform(X_feat_array)
     X_umap = umap_reducer.transform(X_feat_scaled)
 
-    # Resize images to match model input if necessary
-    expected_shape = model.input[0].shape[1:3] if isinstance(model.input, list) else model.input.shape[1:3]
-    if tuple(X_img.shape[1:3]) != tuple(expected_shape):
-        print(f"✂️ Resizing images to {expected_shape} ...")
-        X_img = tf.image.resize(X_img, expected_shape).numpy()
-
     print("🔮 Running inference to get baseline probabilities ...")
-    # Batch predict to avoid OOM
-    y_proba = model.predict([X_img, X_feat_scaled, X_umap], batch_size=32, verbose=1)
+    y_proba = model.predict([X_img_array, X_feat_scaled, X_umap], batch_size=32, verbose=1)
     
     y_pred_baseline = np.argmax(y_proba, axis=1)
     print_metrics(y_true, y_pred_baseline, "BASELINE PERFORMANCE (Standard Argmax)")

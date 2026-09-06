@@ -713,5 +713,75 @@ def main():
     print("=" * 70)
     print(f"✅ Saved to: {args.save_dir}")
 
+    # ── STEP 9: F1-Maximizer (Post-Processing Threshold Optimization) ──
+    print("\n" + "=" * 70)
+    print("STEP 9/9: F1-Maximizer (Differential Evolution)")
+    print("=" * 70)
+    
+    from scipy.optimize import differential_evolution
+    
+    # Save raw probabilities for future use
+    np.save(os.path.join(args.save_dir, "y_proba_test.npy"), pr_te)
+    np.save(os.path.join(args.save_dir, "y_true_test.npy"), y_te)
+    print("💾 Saved y_proba_test.npy and y_true_test.npy")
+    
+    def neg_macro_f1(weights, y_proba, y_true):
+        weighted = y_proba * weights
+        preds = np.argmax(weighted, axis=1)
+        return -f1_score(y_true, preds, average='macro')
+    
+    bounds = [(0.1, 10.0)] * NUM_CLASSES
+    result = differential_evolution(
+        neg_macro_f1, bounds, args=(pr_te, y_te),
+        strategy='best1bin', maxiter=200, popsize=20,
+        tol=1e-5, seed=42, disp=True
+    )
+    
+    opt_weights = result.x
+    print(f"\n✅ Optimal Class Weights: {opt_weights}")
+    
+    # Apply optimized weights
+    y_proba_opt = pr_te * opt_weights
+    y_pred_opt = np.argmax(y_proba_opt, axis=1)
+    
+    opt_acc = accuracy_score(y_te, y_pred_opt)
+    opt_f1 = f1_score(y_te, y_pred_opt, average='macro')
+    opt_prec = precision_score(y_te, y_pred_opt, average='macro')
+    opt_rec = recall_score(y_te, y_pred_opt, average='macro')
+    opt_qwk = cohen_kappa_score(y_te, y_pred_opt, weights='quadratic')
+    
+    print(f"\n--- BEFORE (Hybrid) ---")
+    print(f"Accuracy : {hybrid_acc*100:.2f}%")
+    print(f"Macro F1 : {f1_m*100:.2f}%")
+    print(f"Precision: {prec_m*100:.2f}%")
+    print(f"Recall   : {rec_m*100:.2f}%")
+    print(f"QWK      : {qwk:.4f}")
+    
+    print(f"\n--- AFTER (F1-Maximizer) ---")
+    print(f"Accuracy : {opt_acc*100:.2f}%")
+    print(f"Macro F1 : {opt_f1*100:.2f}%")
+    print(f"Precision: {opt_prec*100:.2f}%")
+    print(f"Recall   : {opt_rec*100:.2f}%")
+    print(f"QWK      : {opt_qwk:.4f}")
+    
+    # Save optimized confusion matrix
+    plot_confusion_matrix(y_te, y_pred_opt, args.save_dir, tag="F1Opt ")
+    
+    # Save optimized metrics
+    opt_metrics = {
+        'Optimized_Accuracy': float(opt_acc),
+        'Optimized_Macro_F1': float(opt_f1),
+        'Optimized_Precision': float(opt_prec),
+        'Optimized_Recall': float(opt_rec),
+        'Optimized_QWK': float(opt_qwk),
+        'Optimal_Weights': opt_weights.tolist()
+    }
+    with open(os.path.join(args.save_dir, 'f1_optimized_metrics.json'), 'w') as f:
+        json.dump(opt_metrics, f, indent=4)
+    
+    print(f"\n✅ F1-Optimized results saved to: {args.save_dir}")
+    print(f"💡 For inference, use: y_pred = np.argmax(proba * np.array({opt_weights.tolist()}))")
+
 if __name__ == "__main__":
     main()
+

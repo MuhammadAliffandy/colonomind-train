@@ -225,7 +225,7 @@ class V5DataGenerator(Sequence):
         if self.use_cutmix and np.random.random() < self.cutmix_prob:
             X_img, X_feat, X_umap, y = cutmix_batch(X_img, X_feat, X_umap, y)
         
-        return [X_img, X_feat, X_umap], y
+        return (X_img, X_feat, X_umap), y
     
     def on_epoch_end(self):
         if self.shuffle:

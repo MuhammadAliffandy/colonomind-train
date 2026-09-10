@@ -19,6 +19,8 @@ import os, cv2, json, joblib, pywt, argparse, gc, math
 import scipy.stats
 import numpy as np
 import pandas as pd
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning, module="sklearn")
 import lightgbm as lgb
 import optuna
 import tensorflow as tf

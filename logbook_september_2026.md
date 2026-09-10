@@ -1,27 +1,27 @@
 # Logbook ColonoMind Project — September 2026
 
-## 8-9 September 2026 (Combined)
-**Milestone:** Perancangan dan Implementasi ColonoMind v5 (Kembali ke Arsitektur Asli)
+## Log 8-9 September 2026 (Combined)
 
-- **Analisis V4:** Menemukan bahwa implementasi V4 (yang menggunakan `EfficientNetV2-S`) tidak sesuai dengan batasan penelitian pada paper asli. F1-Maximizer juga gagal menaikkan metrik di V4 karena probabilitas model sudah di titik jenuh (overconfident).
-- **Studi Legacy Code:** Melakukan bedah kode pada `Legacy_Notebooks/Utilities/Super Agent.ipynb` untuk memastikan arsitektur asli yang dipakai di awal penelitian. Ditemukan bahwa backbone asli adalah **SE-CNN (Conv2D + SE Block)**, bukan EfficientNet. Selain itu, fitur yang masuk ke agen LightGBM adalah **Deep Fusion Features (512-dim) + Probs + Entropy**, bukan sekadar 4 probabilitas saja.
-- **Implementasi V5 (`train_colonomind_v5.py`):** 
-  - Membangun ulang backbone Mod-SE CNN (Conv2D 32→64→128→256→512 + SE Block).
-  - Menambahkan optimasi kuat untuk menutupi kelemahan CNN tanpa pre-trained ImageNet:
-    1. **Ordinal Focal Loss + OHEM** (Hanya belajar dari 70% sampel tersulit dan menghukum kesalahan kelas yang jauh).
-    2. **CutMix Augmentation (20%)** untuk mencegah over-memorization.
-    3. **3-Phase Training** (Warmup → Mid → Full) total 210 epochs dengan Cosine Annealing.
-    4. **Super Agent (643-dim features)** yang dituning dengan **Optuna (30 trials × 5-Fold CV)**.
-    5. **Per-class confidence threshold routing** untuk Hybrid Agent.
-    6. **F1-Maximizer** via Differential Evolution.
-- **Deployment:** Menyiapkan `run_colonomind_v5_pipeline.sh` dan menjalankan eksperimen v5 di server DGX menggunakan `nohup`.
+| Parameter | Deskripsi |
+|---|---|
+| **Tanggal & Waktu** | 8 - 9 September 2026 |
+| **Rencana Harian** | Mengevaluasi kegagalan model V4 dan merancang ulang arsitektur ColonoMind V5 agar kembali sesuai dengan batasan *paper* (menggunakan *Mod-SE CNN* murni tanpa pre-trained ImageNet). |
+| **Aktivitas yang Dilakukan** | 1. Melakukan studi pada `Legacy_Notebooks/Utilities/Super Agent.ipynb` untuk membongkar arsitektur asli.<br>2. Menulis ulang skrip `train_colonomind_v5.py` dengan fondasi SE-CNN (Conv2D + SE Block).<br>3. Menambahkan 9 langkah optimasi (Ordinal Focal Loss, CutMix 20%, Cosine Annealing, dsb) untuk menutupi kelemahan CNN.<br>4. Membangun *Super Agent* LightGBM dengan 643-dimensi fitur (608 Deep Fusion + 28 Handcrafted + 2 UMAP + 4 Probs + 1 Entropy) yang di-tuning via Optuna.<br>5. Menjalankan *pipeline* di *server* DGX. |
+| **Hasil/Capaian** | Selesai menyusun skrip *pipeline* V5 yang secara teoritis jauh lebih kuat dari V4 dan mematuhi aturan *research*. Proses *training* berhasil dijalankan menggunakan `nohup`. |
+| **Kendala/Masalah** | Model V4 dengan *EfficientNetV2-S* melanggar batasan arsitektur riset. Sementara itu, melatih Mod-SE CNN murni dari nol memakan waktu yang sangat lama dan butuh penanganan *overfitting* yang lebih ketat. |
+| **Solusi/Tindak Lanjut** | Memberlakukan 3-Phase Training (30 *warmup* + 60 *mid* + 120 *full*) dengan total 210 *epochs*. Menerapkan *CutMix* dan *OHEM* untuk memaksa model fokus membedakan batas-batas kelas MES yang rumit (terutama MES1). |
+| **Dokumentasi (Link/Ref)** | `train_colonomind_v5.py`, `run_colonomind_v5_pipeline.sh` |
 
 ---
 
-## 10 September 2026
-**Milestone:** Debugging Pipeline V5 dan Fitur Auto-Resume
+## Log 10 September 2026
 
-- **Analisis Server:** Menemukan bahwa proses training Optuna (Super Agent) terhenti tadi malam karena server DGX mengalami restart tak terduga.
-- **Log Cleaning:** Memperbaiki file `train_colonomind_v5.py` dengan menambahkan `warnings.filterwarnings("ignore")` untuk membungkam spam `UserWarning` dari Scikit-Learn saat Optuna melatih 150 model LightGBM.
-- **Auto-Resume Feature:** Menambahkan logika pada pipeline agar secara otomatis melewati fase training CNN (Phase 1-3) jika file `best_secnn_v5.h5` sudah terdeteksi ada. Ini mencegah penghapusan hasil training CNN yang sudah berjalan berjam-jam sebelum server mati.
-- **Git Push & Rerun:** Melakukan komit dan push perbaikan (`feat: skip CNN training if checkpoint exists to resume safely`), dan menjalankan ulang pipeline di DGX. Proses berhasil dilanjutkan langsung ke ekstraksi fitur dan Optuna Tuning (Step 6 & 7).
+| Parameter | Deskripsi |
+|---|---|
+| **Tanggal & Waktu** | 10 September 2026 |
+| **Rencana Harian** | Memantau hasil *training* V5 di *server* DGX dan memperbaiki *pipeline* jika terjadi *error*. |
+| **Aktivitas yang Dilakukan** | 1. Mengecek *log* *training* V5 yang terhenti.<br>2. Menganalisis *log* dan menemukan bahwa proses tersangkut pada tahap *Optuna tuning*.<br>3. Menambahkan kode untuk menyembunyikan (*suppress*) spam `UserWarning` dari modul *Scikit-Learn* di LightGBM.<br>4. Membuat fitur *Auto-Resume* di dalam skrip `train_colonomind_v5.py`.<br>5. Mematikan (kill) *zombie process* lama dan menjalankan ulang *pipeline*. |
+| **Hasil/Capaian** | *Pipeline* berhasil berjalan dengan *log* yang bersih. Skrip otomatis melewati fase *training* CNN yang memakan waktu lama karena berhasil memuat *checkpoint* model dari hari sebelumnya, langsung melompat ke tahap *Optuna Tuning* dan *Hybrid Routing*. |
+| **Kendala/Masalah** | *Server* DGX mengalami *restart* semalaman (berdasarkan notifikasi sistem) sehingga mematikan proses `nohup` secara paksa di tengah jalan (tepat di Langkah 7/9). |
+| **Solusi/Tindak Lanjut** | Menghapus kode `rm -f` pada skrip `.sh` untuk menghindari penghapusan model CNN yang sudah susah payah dilatih. Menambahkan kondisi `if os.path.exists` untuk langsung *load* `best_secnn_v5.h5` jika *server* mati lagi di masa depan. |
+| **Dokumentasi (Link/Ref)** | `colonomind_v5_training.log` (Disimpan di `../Result/ColonoMind_v5`) |

@@ -549,7 +549,7 @@ def main():
 
     # Optuna: maximise Macro F1 via 5-Fold CV
     print(f"\n🔧 Optuna ({args.optuna_trials} trials × 5-Fold, objective=Macro F1)...")
-    optuna.logging.set_verbosity(optuna.logging.WARNING)
+    optuna.logging.set_verbosity(optuna.logging.INFO)
 
     def objective(trial):
         param = dict(
@@ -566,7 +566,7 @@ def main():
             feature_fraction= trial.suggest_float('feature_fraction',0.3, 0.9),
             bagging_fraction= trial.suggest_float('bagging_fraction',0.5, 0.9),
             bagging_freq    = trial.suggest_int  ('bagging_freq',    1, 5),
-            class_weight='balanced', n_jobs=-1
+            class_weight='balanced', n_jobs=8
         )
         cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
         scores = []
@@ -586,7 +586,7 @@ def main():
     best_p = study.best_params
     best_p.update(dict(objective='multiclass', num_class=NUM_CLASSES,
                         metric='multi_logloss', verbosity=-1,
-                        class_weight='balanced', n_jobs=-1))
+                        class_weight='balanced', n_jobs=8))
     final_agent = lgb.LGBMClassifier(**best_p)
     final_agent.fit(X_ag_tr_s, y_tr,
                     eval_set=[(X_ag_te_s, y_te)],

@@ -21,9 +21,10 @@ echo "Routing     : Per-class confidence threshold (not global)"
 echo "Final       : F1-Maximizer (Differential Evolution)"
 echo "======================================================================"
 
-rm -f "$SAVE_DIR/best_secnn_v5.h5"
-rm -f "$SAVE_DIR/scaler_v5.pkl" "$SAVE_DIR/umap_v5.pkl"
-rm -f "$SAVE_DIR/dataset_cache_v5.npz"
+# Clean old model only if you want to force fresh training
+# rm -f "$SAVE_DIR/best_secnn_v5.h5"
+# rm -f "$SAVE_DIR/scaler_v5.pkl" "$SAVE_DIR/umap_v5.pkl"
+# rm -f "$SAVE_DIR/dataset_cache_v5.npz"
 
 nohup python -u src/train_colonomind_v5.py \
     --base_dir      "$BASE_DIR" \

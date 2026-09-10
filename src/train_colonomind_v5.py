@@ -466,43 +466,46 @@ def main():
     # ── STEP 5: 3-Phase Training ──────────────────────────────────────────────
     print("\n" + "="*70); print("STEP 5/9: 3-Phase Training"); print("="*70)
 
-    # Phase 1 – Warmup (feature branches only)
-    print(f"\n🔥 Phase 1: Warmup ({args.epochs_warmup} epochs, lr=5e-4)")
-    model.compile(optimizer=Adam(5e-4), loss=loss_fn, metrics=['accuracy'])
-    model.fit(tr_gen, validation_data=va_gen, epochs=args.epochs_warmup,
-              class_weight=cw_dict,
-              callbacks=[
-                  ModelCheckpoint(mp, save_best_only=True,
-                                  monitor='val_accuracy', mode='max', verbose=1),
-                  CosineAnneal(5e-4, 1e-5, args.epochs_warmup)
-              ], verbose=1)
+    if os.path.exists(mp):
+        print(f"\n⚡ Found existing CNN checkpoint at {mp}. Skipping Phase 1-3 training!")
+    else:
+        # Phase 1 – Warmup (feature branches only)
+        print(f"\n🔥 Phase 1: Warmup ({args.epochs_warmup} epochs, lr=5e-4)")
+        model.compile(optimizer=Adam(5e-4), loss=loss_fn, metrics=['accuracy'])
+        model.fit(tr_gen, validation_data=va_gen, epochs=args.epochs_warmup,
+                  class_weight=cw_dict,
+                  callbacks=[
+                      ModelCheckpoint(mp, save_best_only=True,
+                                      monitor='val_accuracy', mode='max', verbose=1),
+                      CosineAnneal(5e-4, 1e-5, args.epochs_warmup)
+                  ], verbose=1)
 
-    # Phase 2 – Mid tune
-    print(f"\n🔥 Phase 2: Mid Fine-Tune ({args.epochs_mid} epochs, lr=2e-4)")
-    model.compile(optimizer=Adam(2e-4), loss=loss_fn, metrics=['accuracy'])
-    model.fit(tr_gen, validation_data=va_gen, epochs=args.epochs_mid,
-              class_weight=cw_dict,
-              callbacks=[
-                  ModelCheckpoint(mp, save_best_only=True,
-                                  monitor='val_accuracy', mode='max', verbose=1),
-                  EarlyStopping(monitor='val_accuracy', patience=15,
-                                restore_best_weights=True, mode='max'),
-                  CosineAnneal(2e-4, 1e-6, args.epochs_mid)
-              ], verbose=1)
+        # Phase 2 – Mid tune
+        print(f"\n🔥 Phase 2: Mid Fine-Tune ({args.epochs_mid} epochs, lr=2e-4)")
+        model.compile(optimizer=Adam(2e-4), loss=loss_fn, metrics=['accuracy'])
+        model.fit(tr_gen, validation_data=va_gen, epochs=args.epochs_mid,
+                  class_weight=cw_dict,
+                  callbacks=[
+                      ModelCheckpoint(mp, save_best_only=True,
+                                      monitor='val_accuracy', mode='max', verbose=1),
+                      EarlyStopping(monitor='val_accuracy', patience=15,
+                                    restore_best_weights=True, mode='max'),
+                      CosineAnneal(2e-4, 1e-6, args.epochs_mid)
+                  ], verbose=1)
 
-    # Phase 3 – Deep fine-tune
-    print(f"\n🔥 Phase 3: Full Fine-Tune ({args.epochs_full} epochs, lr=1e-4)")
-    model.compile(optimizer=Adam(1e-4), loss=loss_fn, metrics=['accuracy'])
-    model.fit(tr_gen, validation_data=va_gen, epochs=args.epochs_full,
-              class_weight=cw_dict,
-              callbacks=[
-                  ModelCheckpoint(mp, save_best_only=True,
-                                  monitor='val_accuracy', mode='max', verbose=1),
-                  EarlyStopping(monitor='val_accuracy', patience=20,
-                                restore_best_weights=True, mode='max'),
-                  ReduceLROnPlateau(monitor='val_loss', factor=0.5,
-                                    patience=5, min_lr=1e-7, verbose=1)
-              ], verbose=1)
+        # Phase 3 – Deep fine-tune
+        print(f"\n🔥 Phase 3: Full Fine-Tune ({args.epochs_full} epochs, lr=1e-4)")
+        model.compile(optimizer=Adam(1e-4), loss=loss_fn, metrics=['accuracy'])
+        model.fit(tr_gen, validation_data=va_gen, epochs=args.epochs_full,
+                  class_weight=cw_dict,
+                  callbacks=[
+                      ModelCheckpoint(mp, save_best_only=True,
+                                      monitor='val_accuracy', mode='max', verbose=1),
+                      EarlyStopping(monitor='val_accuracy', patience=20,
+                                    restore_best_weights=True, mode='max'),
+                      ReduceLROnPlateau(monitor='val_loss', factor=0.5,
+                                        patience=5, min_lr=1e-7, verbose=1)
+                  ], verbose=1)
 
     model = load_model(mp, custom_objects={'OrdinalFocalOHEM': OrdinalFocalOHEM})
     print("✅ Best checkpoint loaded")

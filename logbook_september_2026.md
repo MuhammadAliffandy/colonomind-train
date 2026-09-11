@@ -25,3 +25,17 @@
 | **Kendala/Masalah** | *Server* DGX mengalami *restart* semalaman (berdasarkan notifikasi sistem) sehingga mematikan proses `nohup` secara paksa di tengah jalan (tepat di Langkah 7/9). |
 | **Solusi/Tindak Lanjut** | Menghapus kode `rm -f` pada skrip `.sh` untuk menghindari penghapusan model CNN yang sudah susah payah dilatih. Menambahkan kondisi `if os.path.exists` untuk langsung *load* `best_secnn_v5.h5` jika *server* mati lagi di masa depan. |
 | **Dokumentasi (Link/Ref)** | `colonomind_v5_training.log` (Disimpan di `../Result/ColonoMind_v5`) |
+
+---
+
+## Log 11 September 2026
+
+| Parameter | Deskripsi |
+|---|---|
+| **Tanggal & Waktu** | 11 September 2026 |
+| **Rencana Harian** | Mengevaluasi performa ColonoMind V6 dan merancang strategi V7 untuk menembus target akurasi >80%, dengan fokus pada peningkatan skor F1 untuk kelas yang tidak seimbang (MES1 dan MES2). Memverifikasi hasil manuskrip secara komprehensif. |
+| **Aktivitas yang Dilakukan** | 1. Melakukan audit komprehensif pada hasil *manuscript* untuk memastikan konsistensi Interval Kepercayaan (CI) dan *confusion matrix*.<br>2. Memperbaiki bug mislabeling kolom metrik (Precision/Recall/F1) dan memisahkan ColonoMind dari tabel perbandingan *baseline*.<br>3. Menganalisis log pelatihan V6 (akurasi 79.40%) yang menunjukkan bahwa bottleneck berada pada skor F1 kelas MES1 dan MES2 akibat distribusi data yang *imbalance*.<br>4. Menyusun skrip `train_colonomind_v7.py` yang menerapkan strategi Focal Loss (CNN), Fine-Tuning dari *checkpoints* V6, serta pembobotan kelas eksponensial di tahap LightGBM. |
+| **Hasil/Capaian** | 1. Artefak dokumen hasil dan matriks kebingungan bersih dari anomali matematis dan sudah siap diajukan ke *reviewer*.<br>2. Skrip *training* V7 sudah selesai dibuat, diverifikasi tanpa *syntax error*, dan siap dilatih di *server* DGX. |
+| **Kendala/Masalah** | Penurunan signifikansi performa pada "zona abu-abu" inflamasi (MES1 dan MES2) di V6, di mana *loss function* konvensional gagal memaksa model untuk membedakan fitur yang mirip di tengah *class imbalance*. |
+| **Solusi/Tindak Lanjut** | Penggunaan `CategoricalFocalCrossentropy` dengan parameter *gamma* dan *alpha* khusus untuk meningkatkan *loss penalty* pada kelas *hard-examples* (MES1 dan MES2). Persiapan *training* V7 di server menggunakan sistem berjalan di belakang layar (*nohup*). |
+| **Dokumentasi (Link/Ref)** | `train_colonomind_v7.py`, `Final_Results_Formatted.md`, `audit_inconsistency.py` |

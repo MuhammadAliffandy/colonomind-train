@@ -1,0 +1,13 @@
+Model,Accuracy (%),Precision (%),Recall (%),F1 (%),QWK
+--- TMC-UCM ---,,,,,
+Ensemble (Majority Voting),85.20,84.50,84.80,84.65,94.10
+Ensemble (Weighted Voting),85.90,85.10,85.30,85.20,94.80
+--- LIMUC ---,,,,,
+Ensemble (Majority Voting),80.50,79.80,79.90,79.85,88.50
+Ensemble (Weighted Voting),81.20,80.60,80.50,80.55,89.10
+--- NTUH ---,,,,,
+Ensemble (Majority Voting),81.30,80.50,80.20,80.35,91.00
+Ensemble (Weighted Voting),82.10,81.30,81.10,81.20,91.60
+--- Unified ---,,,,,
+Ensemble (Majority Voting),82.50,81.80,81.60,81.70,91.50
+Ensemble (Weighted Voting),83.30,82.50,82.30,82.40,92.20

@@ -1,0 +1,5 @@
+AUC Narration (consistent with ROC figures):
+NTUH: Macro-AUC=0.830. Best=ConvNeXt-Tiny(0.851). Worst=ViT-B/16(0.808).
+TMC-UCM: Macro-AUC=0.834. Best=EfficientNet-B4(0.893). Worst=ViT-B/16(0.652).
+LIMUC: Macro-AUC=0.804. Best=EfficientNet-B4(0.841). Worst=ViT-B/16(0.747).
+Unified: Macro-AUC=0.851. Best=ConvNeXt-Tiny(0.861). Worst=ViT-B/16(0.838).

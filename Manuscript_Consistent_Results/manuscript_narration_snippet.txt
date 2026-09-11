@@ -1,5 +1,0 @@
-=== MANUSCRIPT NARRATION (AUC values are consistent with ROC figures) ===
-NTUH: Macro-average AUC = 0.835. Best: ColonoMind (Ours) (AUC=0.863). Worst: ViT-B/16 (AUC=0.808).
-TMC-UCM: Macro-average AUC = 0.843. Best: EfficientNet-B4 (AUC=0.893). Worst: ViT-B/16 (AUC=0.652).
-LIMUC: Macro-average AUC = 0.812. Best: ColonoMind (Ours) (AUC=0.851). Worst: ViT-B/16 (AUC=0.747).
-Unified: Macro-average AUC = 0.855. Best: ColonoMind (Ours) (AUC=0.876). Worst: ViT-B/16 (AUC=0.838).

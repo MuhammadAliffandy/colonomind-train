@@ -39,3 +39,17 @@
 | **Kendala/Masalah** | Penurunan signifikansi performa pada "zona abu-abu" inflamasi (MES1 dan MES2) di V6, di mana *loss function* konvensional gagal memaksa model untuk membedakan fitur yang mirip di tengah *class imbalance*. |
 | **Solusi/Tindak Lanjut** | Penggunaan `CategoricalFocalCrossentropy` dengan parameter *gamma* dan *alpha* khusus untuk meningkatkan *loss penalty* pada kelas *hard-examples* (MES1 dan MES2). Persiapan *training* V7 di server menggunakan sistem berjalan di belakang layar (*nohup*). |
 | **Dokumentasi (Link/Ref)** | `train_colonomind_v7.py`, `Final_Results_Formatted.md`, `audit_inconsistency.py` |
+
+---
+
+## Log 13 September 2026
+
+| Parameter | Deskripsi |
+|---|---|
+| **Tanggal & Waktu** | 13 September 2026 |
+| **Rencana Harian** | Mengevaluasi hasil *training* V7 dan merancang arsitektur pamungkas V8 menggunakan strategi *Hierarchical Classification* murni Mod-SE CNN tanpa bantuan *Knowledge Distillation*. |
+| **Aktivitas yang Dilakukan** | 1. Menganalisis log V7: Focal Loss terbukti berhasil meningkatkan sensitivitas terhadap kelas radang (Recall MES1 dan MES2 naik drastis menjadi >74%). Namun, tingginya sensitivitas ini menyebabkan banyak *false positive* pada kelas mayoritas (MES0), sehingga akurasi total turun dari 79.40% ke 78.27%.<br>2. Menyusun strategi *Two-Stage Classification* (Hierarkis) untuk V8 dengan tetap mempertahankan arsitektur murni Mod-SE CNN sesuai *constraint* riset.<br>3. Membuat skrip `train_colonomind_v8_hierarchical.py` yang memecah *pipeline* menjadi dua agen: *Detector* (Normal vs Sakit) dan *Severity Grader* (MES1 vs 2 vs 3).<br>4. Menerapkan *Transfer Learning*: Memuat *weights* dari model V6, membongkar *layer* klasifikasinya, dan melakukan *fine-tuning* pada masing-masing tugas spesifik (biner dan terner) dengan *learning rate* sangat kecil. |
+| **Hasil/Capaian** | Arsitektur V8 berhasil diselesaikan dan lolos uji sintaks. *Pipeline* prediksi ujung-ke-ujung (*end-to-end*) telah disusun sehingga gambar akan disaring oleh spesialis Normal (Tahap 1) sebelum diteruskan ke spesialis Derajat Keparahan (Tahap 2). |
+| **Kendala/Masalah** | Keterbatasan kapasitas ekstraksi fitur dari CNN kecil (Mod-SE CNN) yang menyebabkan saling tumpang tindihnya fitur antara MES0 dan MES1 jika diajarkan 4 kelas sekaligus secara langsung. |
+| **Solusi/Tindak Lanjut** | Strategi hierarkis (membagi beban kerja klasifikasi) memungkinkan Mod-SE CNN berkonsentrasi penuh membedakan *subset* visual tertentu tanpa terdistraksi. Siap dieksekusi di *server*. |
+| **Dokumentasi (Link/Ref)** | `train_colonomind_v8_hierarchical.py` |

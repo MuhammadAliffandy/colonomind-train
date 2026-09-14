@@ -219,10 +219,12 @@ def main():
             v6_model = load_model(v6_path, compile=False)
             model = build_se_cnn_hybrid(seed, num_classes=2)
             
-            # Transfer weights
-            for layer in model.layers:
-                if layer.name != 'output':
-                    layer.set_weights(v6_model.get_layer(layer.name).get_weights())
+            # Transfer weights bypassing Keras layer naming conflicts
+            v8_weights = model.get_weights()
+            v6_weights = v6_model.get_weights()
+            # Copy all weights except the last layer's kernel and bias (last 2 elements)
+            v8_weights[:-2] = v6_weights[:-2]
+            model.set_weights(v8_weights)
                     
             model.compile(optimizer=Adam(5e-5), loss=loss_fn, metrics=['accuracy'])
             model.fit(tr_gen1, validation_data=va_gen1, epochs=args.epochs_ft, class_weight=dict(enumerate(cw1)),
@@ -249,10 +251,12 @@ def main():
             v6_model = load_model(v6_path, compile=False)
             model = build_se_cnn_hybrid(seed, num_classes=3)
             
-            # Transfer weights
-            for layer in model.layers:
-                if layer.name != 'output':
-                    layer.set_weights(v6_model.get_layer(layer.name).get_weights())
+            # Transfer weights bypassing Keras layer naming conflicts
+            v8_weights = model.get_weights()
+            v6_weights = v6_model.get_weights()
+            # Copy all weights except the last layer's kernel and bias (last 2 elements)
+            v8_weights[:-2] = v6_weights[:-2]
+            model.set_weights(v8_weights)
                     
             model.compile(optimizer=Adam(5e-5), loss=loss_fn, metrics=['accuracy'])
             model.fit(tr_gen2, validation_data=va_gen2, epochs=args.epochs_ft, class_weight=dict(enumerate(cw2)),

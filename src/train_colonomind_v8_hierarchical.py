@@ -158,39 +158,34 @@ def main():
     all_imgs, all_feats, all_labels = d['imgs'], d['feats'], list(d['labels'])
     y_enc_full = LabelEncoder().fit_transform(all_labels) # 0, 1, 2, 3
     
-    # Create Hierarchical Labels
-    # Stage 1: 0 (Normal) vs 1 (Active Disease, which is MES1,2,3)
-    y_stage1 = np.where(y_enc_full == 0, 0, 1)
+    # ── 2. Universal Data Splitting (Matches V6 EXACTLY) ───────────────────────
+    # Split FULL data first so indices perfectly match V6 & evaluation metrics
+    X_tv_i, X_te_i, X_tv_f, X_te_f, y_tv, y_te_full = train_test_split(all_imgs, all_feats, y_enc_full, test_size=0.20, random_state=42, stratify=y_enc_full)
+    X_tr_i, X_va_i, X_tr_f, X_va_f, y_tr, y_va = train_test_split(X_tv_i, X_tv_f, y_tv, test_size=0.20, random_state=42, stratify=y_tv)
     
-    # Stage 2: Only Active Disease subset. Mapped to 0 (MES1), 1 (MES2), 2 (MES3)
-    active_idx = np.where(y_enc_full > 0)[0]
-    X_imgs_stg2 = all_imgs[active_idx]
-    X_feats_stg2 = all_feats[active_idx]
-    y_stage2 = y_enc_full[active_idx] - 1
+    # ── Create Hierarchical Subsets from the exact splits ──
+    # STAGE 1: 0 (Normal) vs 1 (Active Disease)
+    y_tr1 = np.where(y_tr == 0, 0, 1)
+    y_va1 = np.where(y_va == 0, 0, 1)
+    y_te1 = np.where(y_te_full == 0, 0, 1)
     
-    # ── 2. Data Splitting ──────────────────────────────────────────────────────
-    # Splits for Stage 1 (All data)
-    X_tv_i1, X_te_i1, X_tv_f1, X_te_f1, y_tv1, y_te1 = train_test_split(all_imgs, all_feats, y_stage1, test_size=0.20, random_state=42, stratify=y_stage1)
-    X_tr_i1, X_va_i1, X_tr_f1, X_va_f1, y_tr1, y_va1 = train_test_split(X_tv_i1, X_tv_f1, y_tv1, test_size=0.20, random_state=42, stratify=y_tv1)
+    # STAGE 2: Only Active Disease subset. (MES1 -> 0, MES2 -> 1, MES3 -> 2)
+    active_tr = np.where(y_tr > 0)[0]
+    X_tr_i2, X_tr_f2, y_tr2 = X_tr_i[active_tr], X_tr_f[active_tr], y_tr[active_tr] - 1
     
-    # Splits for Stage 2 (Active only)
-    X_tv_i2, X_te_i2, X_tv_f2, X_te_f2, y_tv2, y_te2 = train_test_split(X_imgs_stg2, X_feats_stg2, y_stage2, test_size=0.20, random_state=42, stratify=y_stage2)
-    X_tr_i2, X_va_i2, X_tr_f2, X_va_f2, y_tr2, y_va2 = train_test_split(X_tv_i2, X_tv_f2, y_tv2, test_size=0.20, random_state=42, stratify=y_tv2)
-    
-    # Full evaluation ground truth (test set)
-    # We must keep the same original test set mapping to compare properly
-    _, _, _, _, _, y_te_full = train_test_split(all_imgs, all_feats, y_enc_full, test_size=0.20, random_state=42, stratify=y_enc_full)
+    active_va = np.where(y_va > 0)[0]
+    X_va_i2, X_va_f2, y_va2 = X_va_i[active_va], X_va_f[active_va], y_va[active_va] - 1
 
     # ── 3. UMAP & Scaling ──────────────────────────────────────────────────────
-    sc = StandardScaler().fit(X_tr_f1)
-    um = umap.UMAP(n_neighbors=15, min_dist=0.1, n_components=2, random_state=42).fit(sc.transform(X_tr_f1))
+    sc = StandardScaler().fit(X_tr_f)
+    um = umap.UMAP(n_neighbors=15, min_dist=0.1, n_components=2, random_state=42).fit(sc.transform(X_tr_f))
     
     def process_feats(features):
         scaled = sc.transform(features)
         return scaled, um.transform(scaled)
         
-    Xtr_s1, Utr1 = process_feats(X_tr_f1); Xva_s1, Uva1 = process_feats(X_va_f1); Xte_s1, Ute1 = process_feats(X_te_f1)
-    Xtr_s2, Utr2 = process_feats(X_tr_f2); Xva_s2, Uva2 = process_feats(X_va_f2); Xte_s2, Ute2 = process_feats(X_te_f2)
+    Xtr_s, Utr = process_feats(X_tr_f); Xva_s, Uva = process_feats(X_va_f); Xte_s, Ute = process_feats(X_te_f)
+    Xtr_s2, Utr2 = process_feats(X_tr_f2); Xva_s2, Uva2 = process_feats(X_va_f2)
 
     # One-hot encoding
     y_tr1_c, y_va1_c = to_categorical(y_tr1, 2), to_categorical(y_va1, 2)
@@ -204,8 +199,8 @@ def main():
     stage1_models = []
     loss_fn = CategoricalCrossentropy(label_smoothing=0.1)
     
-    tr_gen1 = V8Generator(X_tr_i1, Xtr_s1, Utr1, y_tr1_c, BATCH_SIZE, augment=True)
-    va_gen1 = V8Generator(X_va_i1, Xva_s1, Uva1, y_va1_c, BATCH_SIZE, augment=False)
+    tr_gen1 = V8Generator(X_tr_i, Xtr_s, Utr, y_tr1_c, BATCH_SIZE, augment=True)
+    va_gen1 = V8Generator(X_va_i, Xva_s, Uva, y_va1_c, BATCH_SIZE, augment=False)
     
     for m_idx, seed in enumerate(ENSEMBLE_SEEDS):
         v6_path = os.path.join(args.v6_checkpoint_dir, f"secnn_v6_seed{seed}.h5")
@@ -275,8 +270,8 @@ def main():
         return np.hstack([np.mean(deeps, axis=0), feats_s, umaps, np.mean(probs, axis=0)]), np.mean(probs, axis=0)
 
     # Stage 1 Agent
-    X_ag_tr1, _ = extract_deep(stage1_models, X_tr_i1, Xtr_s1, Utr1, 2)
-    X_ag_te1, prob_stg1 = extract_deep(stage1_models, X_te_i1, Xte_s1, Ute1, 2)
+    X_ag_tr1, _ = extract_deep(stage1_models, X_tr_i, Xtr_s, Utr, 2)
+    X_ag_te1, prob_stg1 = extract_deep(stage1_models, X_te_i, Xte_s, Ute, 2)
     lgb1 = lgb.LGBMClassifier(n_estimators=300, learning_rate=0.01, class_weight='balanced', max_depth=5, num_leaves=31)
     lgb1.fit(X_ag_tr1, y_tr1)
     ag_pred_1 = lgb1.predict(X_ag_te1)
@@ -284,7 +279,7 @@ def main():
 
     # Stage 2 Agent
     X_ag_tr2, _ = extract_deep(stage2_models, X_tr_i2, Xtr_s2, Utr2, 3)
-    X_ag_te2_full, prob_stg2_full = extract_deep(stage2_models, X_te_i1, Xte_s1, Ute1, 3) # Predict on FULL test set to route later
+    X_ag_te2_full, prob_stg2_full = extract_deep(stage2_models, X_te_i, Xte_s, Ute, 3) # Predict on FULL test set to route later
     lgb2 = lgb.LGBMClassifier(n_estimators=500, learning_rate=0.01, class_weight='balanced', max_depth=6, num_leaves=40)
     lgb2.fit(X_ag_tr2, y_tr2)
     ag_pred_2_full = lgb2.predict(X_ag_te2_full)

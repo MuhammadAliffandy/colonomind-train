@@ -177,8 +177,14 @@ def main():
     X_va_i2, X_va_f2, y_va2 = X_va_i[active_va], X_va_f[active_va], y_va[active_va] - 1
 
     # ── 3. UMAP & Scaling ──────────────────────────────────────────────────────
-    sc = StandardScaler().fit(X_tr_f)
-    um = umap.UMAP(n_neighbors=15, min_dist=0.1, n_components=2, random_state=42).fit(sc.transform(X_tr_f))
+    sp, up = os.path.join(args.save_dir,"scaler_v8.pkl"), os.path.join(args.save_dir,"umap_v8.pkl")
+    if os.path.exists(sp) and os.path.exists(up):
+        sc, um = joblib.load(sp), joblib.load(up)
+    else:
+        sc = StandardScaler().fit(X_tr_f)
+        um = umap.UMAP(n_neighbors=15, min_dist=0.1, n_components=2, random_state=42).fit(sc.transform(X_tr_f))
+        joblib.dump(sc, sp)
+        joblib.dump(um, up)
     
     def process_feats(features):
         scaled = sc.transform(features)
@@ -283,6 +289,10 @@ def main():
     lgb2 = lgb.LGBMClassifier(n_estimators=500, learning_rate=0.01, class_weight='balanced', max_depth=6, num_leaves=40)
     lgb2.fit(X_ag_tr2, y_tr2)
     ag_pred_2_full = lgb2.predict(X_ag_te2_full)
+    
+    # Save Super Agents
+    lgb1.booster_.save_model(os.path.join(args.save_dir, "super_agent_stage1.txt"))
+    lgb2.booster_.save_model(os.path.join(args.save_dir, "super_agent_stage2.txt"))
 
     # ── 7. Evaluate End-to-End Pipeline ────────────────────────────────────────
     print("\n" + "="*70); print("STAGE 4/4: End-to-End Pipeline Inference"); print("="*70)

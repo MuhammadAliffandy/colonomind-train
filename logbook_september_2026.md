@@ -53,3 +53,31 @@
 | **Kendala/Masalah** | Keterbatasan kapasitas ekstraksi fitur dari CNN kecil (Mod-SE CNN) yang menyebabkan saling tumpang tindihnya fitur antara MES0 dan MES1 jika diajarkan 4 kelas sekaligus secara langsung. |
 | **Solusi/Tindak Lanjut** | Strategi hierarkis (membagi beban kerja klasifikasi) memungkinkan Mod-SE CNN berkonsentrasi penuh membedakan *subset* visual tertentu tanpa terdistraksi. Siap dieksekusi di *server*. |
 | **Dokumentasi (Link/Ref)** | `train_colonomind_v8_hierarchical.py` |
+
+---
+
+## Log 15 September 2026
+
+| Parameter | Deskripsi |
+|---|---|
+| **Tanggal & Waktu** | 15 September 2026 |
+| **Rencana Harian** | Mengeksekusi pelatihan *pipeline* V8 Hierarchical, memecahkan kendala teknis *framework*, dan memastikan seluruh model prediksi (CNN dan Super Agent) tersimpan sempurna. |
+| **Aktivitas yang Dilakukan** | 1. Melakukan *troubleshooting* pada *bug* perpindahan bobot Keras (*ValueError: No such layer*) dengan memotong (*slicing*) list array bobot secara langsung menggunakan `get_weights()` untuk mengabaikan auto-inkremen nama lapisan.<br>2. Menyelesaikan kebocoran data (*data leakage*) dan mis-alignment set pengujian pada Agen Tahap 4 dengan menerapkan pemisahan data stratifikasi tunggal (berdasarkan `y_enc_full`) yang sama persis dengan skema V6.<br>3. Menambahkan skrip penyimpanan untuk Standard Scaler, UMAP, serta *booster* dari kedua Super Agent LightGBM agar tidak hilang setelah evaluasi memori. |
+| **Hasil/Capaian** | **Terobosan Utama!** Pipeline V8 berhasil berjalan lancar dari ujung-ke-ujung (Tahap 1 hingga Tahap 4). Kombinasi "Detector" (Biner) dan "Grader" (Terner) terbukti ampuh mengatasi bias kelas dan berhasil mengamankan **akurasi gabungan menembus batas >80%** menggunakan arsitektur Mod-SE CNN murni! Seluruh model akhir berhasil diekstraksi ke disk. |
+| **Kendala/Masalah** | Penamaan layer otomatis oleh Keras, dan masalah logika pemisahan data uji di awal *development* yang menyebabkan hasil tahap 4 acak (31%). Ketiadaan perintah *save_model* pada agen pohon keputusan di iterasi pertama. |
+| **Solusi/Tindak Lanjut** | Merombak logika perpindahan bobot (*weight transfer*), merekayasa ulang alur pemisahan set data, dan memodifikasi *script* sehingga *training* CNN dapat di-*skip* dan langsung menyimpan agen *ensemble* dalam hitungan detik. |
+| **Dokumentasi (Link/Ref)** | `train_colonomind_v8_hierarchical.py`, `v8_saving.log` |
+
+---
+
+## Log 16 September 2026
+
+| Parameter | Deskripsi |
+|---|---|
+| **Tanggal & Waktu** | 16 September 2026 |
+| **Rencana Harian** | Mengevaluasi hasil V8 dan merancang arsitektur pamungkas generasi kedua: **ColonoMind V9 (Mod-SE V2)** untuk mengembalikan F1-Score MES1 dan MES2 yang turun akibat efek samping strategi *hierarchical*. |
+| **Aktivitas yang Dilakukan** | 1. Menganalisis *trade-off* di V8: Skema hierarkis berhasil mengamankan akurasi total >80% (menekan *false positive* MES0), namun mengorbankan Recall/F1 pada kelas MES1 (68%) dan MES2 (69%).<br>2. Mengevolusikan blok arsitektur kustom *Squeeze-and-Excitation* (SE) menjadi *Convolutional Block Attention Module* (CBAM). Penambahan *Spatial Attention* ini bertujuan agar model mampu melacak **lokasi presisi** lesi mukosa, bukan sekadar warnanya.<br>3. Menanamkan *Residual Connections* (jalan pintas identitas) di setiap *layer* konvolusi utama untuk memungkinkan ekstraksi fitur yang lebih dalam tanpa memicu *vanishing gradient*.<br>4. Menyusun skrip `train_colonomind_v9_modsev2.py` yang melatih arsitektur V2 ini murni dari awal (*from scratch*) dengan penggabungan pelindung Focal Loss (*gamma=2.0*) dan agregator akhir LightGBM Super Agent. |
+| **Hasil/Capaian** | Arsitektur *custom* Mod-SE V2 berhasil di-koding dan lolos uji sintaks Keras. Ini memberikan nilai kebaruan (*novelty*) tambahan yang masif untuk manuskrip riset karena membuktikan upaya evolusi mandiri (V1 ke V2) tanpa melanggar batasan larangan penggunaan *pre-trained model* dari luar. |
+| **Kendala/Masalah** | Kapasitas Mod-SE V1 yang terlalu kecil (mentok) untuk mempertahankan ketajaman fitur spasial pada inflamasi abu-abu (MES1/MES2) di lingkungan data yang super timpang (*imbalanced*). |
+| **Solusi/Tindak Lanjut** | Mod-SE V2 (CBAM + Residual) siap untuk dieksekusi dari awal. Skrip dikonfigurasi untuk menjalankan 3 *seed* ensembel secara penuh. |
+| **Dokumentasi (Link/Ref)** | `train_colonomind_v9_modsev2.py` |

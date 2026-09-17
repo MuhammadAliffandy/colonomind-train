@@ -15,6 +15,8 @@ import warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="sklearn")
 import lightgbm as lgb
 import tensorflow as tf
+import keras
+keras.config.enable_unsafe_deserialization()  # FIX for "ValueError: Requested the deserialization of a 'Lambda' layer..."
 from sklearn.metrics import classification_report, accuracy_score
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.model_selection import train_test_split

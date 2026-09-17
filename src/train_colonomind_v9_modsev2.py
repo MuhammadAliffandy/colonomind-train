@@ -230,14 +230,14 @@ def main():
         model_path = os.path.join(args.save_dir, f"modsev2_cnn_seed{seed}.h5")
         if os.path.exists(model_path):
             print(f"⚡ Loading Mod-SE V2 {seed}")
-            model = load_model(model_path, compile=False)
+            model = load_model(model_path, compile=False, safe_mode=False)
         else:
             print(f"🔥 Training Mod-SE V2 from scratch {seed}")
             model = build_modse_v2_hybrid(seed, num_classes=4)
             model.compile(optimizer=Adam(1e-4), loss=focal_loss, metrics=['accuracy'])
             model.fit(tr_gen, validation_data=va_gen, epochs=args.epochs,
                       callbacks=[ModelCheckpoint(model_path, save_best_only=True, monitor='val_accuracy'), EarlyStopping(patience=8)], verbose=1)
-            model = load_model(model_path, compile=False)
+            model = load_model(model_path, compile=False, safe_mode=False)
         models.append(model)
 
     # ── 5. Train Super Agent ──

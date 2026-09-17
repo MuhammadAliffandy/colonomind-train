@@ -15,8 +15,6 @@ import warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="sklearn")
 import lightgbm as lgb
 import tensorflow as tf
-import keras
-keras.config.enable_unsafe_deserialization()  # FIX for "ValueError: Requested the deserialization of a 'Lambda' layer..."
 from sklearn.metrics import classification_report, accuracy_score
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.model_selection import train_test_split
@@ -115,8 +113,8 @@ def cbam_block(cbam_feature, ratio=8):
     channel_attention = Multiply()([cbam_feature, cbam_feature_c])
     
     # Spatial attention
-    avg_pool_s = Lambda(lambda x: tf.reduce_mean(x, axis=-1, keepdims=True))(channel_attention)
-    max_pool_s = Lambda(lambda x: tf.reduce_max(x, axis=-1, keepdims=True))(channel_attention)
+    avg_pool_s = tf.reduce_mean(channel_attention, axis=-1, keepdims=True)
+    max_pool_s = tf.reduce_max(channel_attention, axis=-1, keepdims=True)
     concat = Concatenate(axis=-1)([avg_pool_s, max_pool_s])
     cbam_feature_s = Conv2D(filters=1, kernel_size=7, strides=1, padding='same', activation='sigmoid', kernel_initializer='he_normal', use_bias=False)(concat)
     spatial_attention = Multiply()([channel_attention, cbam_feature_s])

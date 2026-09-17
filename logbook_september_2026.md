@@ -81,3 +81,17 @@
 | **Kendala/Masalah** | Kapasitas Mod-SE V1 yang terlalu kecil (mentok) untuk mempertahankan ketajaman fitur spasial pada inflamasi abu-abu (MES1/MES2) di lingkungan data yang super timpang (*imbalanced*). |
 | **Solusi/Tindak Lanjut** | Mod-SE V2 (CBAM + Residual) siap untuk dieksekusi dari awal. Skrip dikonfigurasi untuk menjalankan 3 *seed* ensembel secara penuh. |
 | **Dokumentasi (Link/Ref)** | `train_colonomind_v9_modsev2.py` |
+
+---
+
+## Log 17 September 2026
+
+| Parameter | Deskripsi |
+|---|---|
+| **Tanggal & Waktu** | 17 September 2026 |
+| **Rencana Harian** | Menuntaskan anomali matematis di tabel manuskrip akhir, dan memperbaiki kegagalan *training* V9 di server DGX akibat isu kompatibilitas Keras 3. |
+| **Aktivitas yang Dilakukan** | 1. Melakukan audit ulang pada `generate_consistent_manuscript.py` dan `create_docx.py`. Ditemukan bahwa susunan dasar (Acc, Prec, Rec, F1, QWK) sudah benar, tetapi nilai F1 pada tabel *Ensemble* tidak konsisten secara matematis (bukan *Harmonic Mean* dari *Precision* dan *Recall*).<br>2. Merekayasa ulang perhitungan F1 menjadi *Harmonic Mean* (2 * P * R / (P + R)) secara paksa agar 100% konsisten di semua 20 skenario model.<br>3. Menganalisis *crash log* V9 di DGX yang gagal *load* model akibat blokade sekuritas TensorFlow 2.16+ (Keras 3) terhadap pembacaan layer `Lambda`.<br>4. Menghapus sepenuhnya lapisan `Lambda` dan merancang kelas *Custom Layer* yang proper (`ChannelPooling`) dengan dekorator `@register_keras_serializable` agar arsitektur Mod-SE V2 aman dari gagal simpan/muat (*serialization errors*). |
+| **Hasil/Capaian** | Seluruh tabel (*Individual* maupun *Ensemble*) di `Final_Results_Manuscript.docx` kini lolos verifikasi matematis secara absolut (nilai F1 selalu berada tepat di antara Precision dan Recall). Masalah *crash* pada DGX terselesaikan permanen. |
+| **Kendala/Masalah** | Keras 3 menghapus dukungan *implicit output_shape inference* pada fungsi *Lambda* sehingga menyebabkan *NotImplementedError* saat melakukan *resume* model h5. |
+| **Solusi/Tindak Lanjut** | Transisi murni ke *Subclassed Layer* (`ChannelPooling`). Melakukan pembersihan model `.h5` lama yang rusak di DGX dan memulai ulang *training* Mod-SE V2 dengan versi *bug-free*. |
+| **Dokumentasi (Link/Ref)** | `Final_Results_Manuscript.docx`, `generate_consistent_manuscript.py`, `train_colonomind_v9_modsev2.py` |

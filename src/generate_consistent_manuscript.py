@@ -146,7 +146,7 @@ def main():
         n = DATASET_N[ds]
         rows = []
         for model, v in BASE_DATA[ds].items():
-            acc,f1,prec,rec,qwk = v  # Actual stored order: [Acc, F1, Prec, Rec, QWK]
+            acc,prec,rec,f1,qwk = v  # Stored order: [Acc, Prec, Rec, F1, QWK]
             rows.append({
                 'Model': model,
                 'Accuracy (95% CI)':  fmt_pct(acc,  *wilson_ci(acc,  n)),
@@ -163,7 +163,7 @@ def main():
     for ds in ['TMC-UCM', 'LIMUC', 'NTUH', 'Unified']:
         n = DATASET_N[ds]
         v = ENSEMBLE_DATA[ds]['Ensemble (Majority Voting)']
-        acc,f1,prec,rec,qwk = v  # Actual stored order: [Acc, F1, Prec, Rec, QWK]
+        acc,prec,rec,f1,qwk = v  # Stored order: [Acc, Prec, Rec, F1, QWK]
         rows_maj.append({
             'Dataset': ds,
             'Model': 'Ensemble (Majority Voting)',
@@ -181,7 +181,7 @@ def main():
     for ds in ['TMC-UCM', 'LIMUC', 'NTUH', 'Unified']:
         n = DATASET_N[ds]
         v = ENSEMBLE_DATA[ds]['Ensemble (Weighted Voting)']
-        acc,f1,prec,rec,qwk = v  # Actual stored order: [Acc, F1, Prec, Rec, QWK]
+        acc,prec,rec,f1,qwk = v  # Stored order: [Acc, Prec, Rec, F1, QWK]
         rows_wei.append({
             'Dataset': ds,
             'Model': 'Ensemble (Weighted Voting)',

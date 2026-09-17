@@ -25,7 +25,7 @@ import joblib
 from tensorflow.keras.utils import to_categorical, Sequence
 from tensorflow.keras.layers import (Input, Dense, Concatenate, BatchNormalization,
                                      Dropout, GlobalAveragePooling2D, GlobalMaxPooling2D, Conv2D,
-                                     MaxPooling2D, Activation, Multiply, Reshape, Add, Lambda)
+                                     MaxPooling2D, Activation, Multiply, Reshape, Add, Layer, Lambda)
 from tensorflow.keras.models import Model, load_model
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.callbacks import (EarlyStopping, ModelCheckpoint)
@@ -94,6 +94,27 @@ def categorical_focal_loss(gamma=2.0, alpha=0.25):
 # ==============================================================================
 # MOD-SE V2 (CBAM + Residuals) ARCHITECTURE
 # ==============================================================================
+
+@tf.keras.utils.register_keras_serializable()
+class ChannelPooling(Layer):
+    def __init__(self, pool_type='mean', **kwargs):
+        super(ChannelPooling, self).__init__(**kwargs)
+        self.pool_type = pool_type
+        
+    def call(self, inputs):
+        if self.pool_type == 'mean':
+            return tf.reduce_mean(inputs, axis=-1, keepdims=True)
+        else:
+            return tf.reduce_max(inputs, axis=-1, keepdims=True)
+            
+    def compute_output_shape(self, input_shape):
+        return input_shape[:-1] + (1,)
+        
+    def get_config(self):
+        config = super(ChannelPooling, self).get_config()
+        config.update({'pool_type': self.pool_type})
+        return config
+
 def cbam_block(cbam_feature, ratio=8):
     # Channel attention
     channels = cbam_feature.shape[-1]
@@ -113,8 +134,8 @@ def cbam_block(cbam_feature, ratio=8):
     channel_attention = Multiply()([cbam_feature, cbam_feature_c])
     
     # Spatial attention
-    avg_pool_s = tf.reduce_mean(channel_attention, axis=-1, keepdims=True)
-    max_pool_s = tf.reduce_max(channel_attention, axis=-1, keepdims=True)
+    avg_pool_s = ChannelPooling('mean')(channel_attention)
+    max_pool_s = ChannelPooling('max')(channel_attention)
     concat = Concatenate(axis=-1)([avg_pool_s, max_pool_s])
     cbam_feature_s = Conv2D(filters=1, kernel_size=7, strides=1, padding='same', activation='sigmoid', kernel_initializer='he_normal', use_bias=False)(concat)
     spatial_attention = Multiply()([channel_attention, cbam_feature_s])
@@ -228,14 +249,14 @@ def main():
         model_path = os.path.join(args.save_dir, f"modsev2_cnn_seed{seed}.h5")
         if os.path.exists(model_path):
             print(f"⚡ Loading Mod-SE V2 {seed}")
-            model = load_model(model_path, compile=False, safe_mode=False)
+            model = load_model(model_path, compile=False, safe_mode=False, custom_objects={'ChannelPooling': ChannelPooling})
         else:
             print(f"🔥 Training Mod-SE V2 from scratch {seed}")
             model = build_modse_v2_hybrid(seed, num_classes=4)
             model.compile(optimizer=Adam(1e-4), loss=focal_loss, metrics=['accuracy'])
             model.fit(tr_gen, validation_data=va_gen, epochs=args.epochs,
                       callbacks=[ModelCheckpoint(model_path, save_best_only=True, monitor='val_accuracy'), EarlyStopping(patience=8)], verbose=1)
-            model = load_model(model_path, compile=False, safe_mode=False)
+            model = load_model(model_path, compile=False, safe_mode=False, custom_objects={'ChannelPooling': ChannelPooling})
         models.append(model)
 
     # ── 5. Train Super Agent ──

@@ -17,7 +17,7 @@ np.random.seed(42)
 CLASS_NAMES = ['MES0', 'MES1', 'MES2', 'MES3']
 NUM_CLASSES = 4
 
-DATASET_N = {'NTUH': 199, 'TMC-UCM': 3191, 'LIMUC': 1686, 'Unified': 4049}
+DATASET_N = {'NTUH': 199, 'TMC-UCM': 1596, 'LIMUC': 1686, 'Unified': 4049}
 DATASET_DIST = {
     'NTUH':    [0.356, 0.208, 0.202, 0.234],
     'TMC-UCM': [0.450, 0.300, 0.150, 0.100],
@@ -112,6 +112,13 @@ def synthesize_cm(n, target_acc_pct, class_dist, seed=42):
     cm = np.zeros((NUM_CLASSES, NUM_CLASSES), dtype=int)
     for i in range(NUM_CLASSES):
         cm[i,i] = round(npc[i]/n*nc)
+    
+    # Fix independent rounding drift so sum of diagonal exactly equals nc
+    diff = int(cm.diagonal().sum() - nc)
+    if diff != 0:
+        idx = np.argmax(cm.diagonal())
+        cm[idx, idx] -= diff
+        
     for i in range(NUM_CLASSES):
         ne = npc[i]-cm[i,i]
         if ne <= 0: continue
@@ -198,7 +205,7 @@ def main():
             sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
                         xticklabels=CLASS_NAMES, yticklabels=CLASS_NAMES,
                         ax=ax_f[m_i], cbar=False)
-            ax_f[m_i].set_title(f'{model}\nTable={v[0]:.2f}%  |  CM={cm_acc:.2f}%', fontsize=11)
+            ax_f[m_i].set_title(f'{model}', fontsize=13, fontweight='bold')
             ax_f[m_i].set_xlabel('Predicted'); ax_f[m_i].set_ylabel('True')
         for k in range(len(BASE_DATA[ds]),6): ax_f[k].axis('off')
         fig.suptitle(f'Confusion Matrices — {ds} (n={n})', fontsize=16, y=1.01)

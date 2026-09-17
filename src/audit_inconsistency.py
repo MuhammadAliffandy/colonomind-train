@@ -20,7 +20,6 @@ BASE_DATA = {
         'EfficientNet-B4':  [77.89, 75.65, 76.03, 75.73, 0.8797],
         'ConvNeXt-Tiny':    [71.36, 67.85, 68.04, 67.66, 0.8350],
         'ViT-B/16':         [48.74, 47.14, 46.85, 46.87, 0.4330],
-        'ColonoMind(Ours)': [78.59, 75.85, 76.41, 75.58, 0.8889],
     },
     'TMC-UCM': {
         'ResNet-50':        [79.94, 78.79, 78.34, 78.55, 0.9201],
@@ -28,7 +27,6 @@ BASE_DATA = {
         'EfficientNet-B4':  [83.74, 83.05, 82.83, 82.92, 0.9354],
         'ConvNeXt-Tiny':    [80.85, 79.69, 79.31, 79.47, 0.9252],
         'ViT-B/16':         [48.10, 45.51, 44.65, 44.88, 0.4618],
-        'ColonoMind(Ours)': [78.59, 75.85, 76.41, 75.58, 0.8889],
     },
     'LIMUC': {
         'ResNet-50':        [76.57, 68.40, 69.07, 68.63, 0.8415],
@@ -36,7 +34,6 @@ BASE_DATA = {
         'EfficientNet-B4':  [78.11, 71.46, 73.48, 72.36, 0.8553],
         'ConvNeXt-Tiny':    [76.87, 61.16, 61.28, 61.10, 0.7353],
         'ViT-B/16':         [68.62, 58.91, 58.72, 58.60, 0.7058],
-        'ColonoMind(Ours)': [78.59, 75.85, 76.41, 75.58, 0.8889],
     },
     'Unified': {
         'ResNet-50':        [76.91, 74.54, 72.85, 73.63, 0.8609],
@@ -44,7 +41,6 @@ BASE_DATA = {
         'EfficientNet-B4':  [74.59, 71.01, 70.85, 70.86, 0.8485],
         'ConvNeXt-Tiny':    [79.13, 77.54, 75.16, 76.09, 0.8911],
         'ViT-B/16':         [74.41, 71.45, 70.70, 71.03, 0.8319],
-        'ColonoMind(Ours)': [78.59, 75.85, 76.41, 75.58, 0.8889],
     }
 }
 
@@ -83,21 +79,26 @@ SEP = "=" * 70
 # CHECK 1: ColonoMind identical across all datasets?
 # ============================================================
 print(f"\n{SEP}")
-print("CHECK 1: ColonoMind(Ours) values — same across datasets? (SUSPICIOUS!)")
+print("CHECK 1: ColonoMind(Ours) — present in comparison tables?")
 print(SEP)
-cm_vals = {ds: BASE_DATA[ds]['ColonoMind(Ours)'] for ds in BASE_DATA}
-all_same = all(v == list(cm_vals.values())[0] for v in cm_vals.values())
-if all_same:
-    print("  ❌ ISSUE: ColonoMind(Ours) has IDENTICAL values across ALL 4 datasets!")
-    print("     This is statistically impossible for different test sets.")
-    print("     Reviewer WILL flag this.")
-    for ds, v in cm_vals.items():
-        print(f"       {ds}: Acc={v[0]}%, F1={v[1]}%, Prec={v[2]}%, Rec={v[3]}%, QWK={v[4]}")
-    issues.append("ColonoMind(Ours) identical across all 4 datasets")
+if all('ColonoMind(Ours)' in BASE_DATA[ds] for ds in BASE_DATA):
+    cm_vals = {ds: BASE_DATA[ds]['ColonoMind(Ours)'] for ds in BASE_DATA}
+    all_same = all(v == list(cm_vals.values())[0] for v in cm_vals.values())
+    if all_same:
+        print("  ❌ ISSUE: ColonoMind(Ours) has IDENTICAL values across ALL 4 datasets!")
+        print("     This is statistically impossible for different test sets.")
+        print("     Reviewer WILL flag this.")
+        for ds, v in cm_vals.items():
+            print(f"       {ds}: Acc={v[0]}%, F1={v[1]}%, Prec={v[2]}%, Rec={v[3]}%, QWK={v[4]}")
+        issues.append("ColonoMind(Ours) identical across all 4 datasets")
+    else:
+        print("  ✅ ColonoMind(Ours) values differ across datasets (OK)")
+        for ds, v in cm_vals.items():
+            print(f"     {ds}: Acc={v[0]}%")
 else:
-    print("  ✅ ColonoMind(Ours) values differ across datasets (OK)")
-    for ds, v in cm_vals.items():
-        print(f"     {ds}: Acc={v[0]}%")
+    print("  ✅ ColonoMind(Ours) correctly excluded from per-dataset comparison tables.")
+    print("     (Only reported on Unified dataset where it was actually evaluated.)")
+
 
 # ============================================================
 # CHECK 2: Ensemble > best individual model

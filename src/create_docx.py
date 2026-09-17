@@ -60,19 +60,21 @@ def main():
                 continue
                 
             row_cells = table.add_row().cells
-            # Order in CSV: Model, Accuracy, F1, Precision, Recall, QWK
-            # We want: Model, Accuracy, Precision, Recall, F1, QWK
+            # CSV order (from generate_consistent_manuscript.py):
+            # Model, Accuracy (95% CI), Precision (95% CI), Recall (95% CI), F1 (95% CI), QWK (95% CI)
+            # Read directly in the correct order — no manual swapping needed.
             model = cols[0]
-            acc = cols[1]
-            f1 = cols[2]
-            prec = cols[3]
-            rec = cols[4]
-            qwk = cols[5]
+            acc   = cols[1]
+            prec  = cols[2]
+            rec   = cols[3]
+            f1    = cols[4]
+            qwk   = cols[5]
             
             ordered_cols = [model, acc, prec, rec, f1, qwk]
             
             for j, text in enumerate(ordered_cols):
                 add_newline_to_cell(row_cells[j], text)
+
                 
         doc.add_paragraph('\n')
         

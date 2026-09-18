@@ -95,3 +95,17 @@
 | **Kendala/Masalah** | Keras 3 menghapus dukungan *implicit output_shape inference* pada fungsi *Lambda* sehingga model yang mengandung *layer* tersebut tidak dapat dilanjutkan pelatihannya (*resume*). |
 | **Solusi/Tindak Lanjut** | Melakukan transisi murni ke *Subclassed Layer* (`ChannelPooling`). Melakukan pembersihan sisa model `.h5` lama yang *corrupt* di DGX dan memulai ulang *training* Mod-SE V2 secara bersih (*from scratch*). |
 | **Dokumentasi (Link/Ref)** | `train_colonomind_v9_modsev2.py` |
+
+---
+
+## Log 18 September 2026
+
+| Parameter | Deskripsi |
+|---|---|
+| **Tanggal & Waktu** | 18 September 2026 |
+| **Rencana Harian** | Mengevaluasi performa V9 dan merancang arsitektur pamungkas **ColonoMind V10 (Hierarchical Mod-SE V2)** untuk mengatasi masalah akurasi yang anjlok akibat *Focal Loss*. |
+| **Aktivitas yang Dilakukan** | 1. Menganalisis *log* hasil akhir V9: Penggunaan *Focal Loss* tunggal berhasil menaikkan *Recall* MES1 dan MES2 hingga ~75%, namun merusak *Precision* secara masif karena model menjadi rentan salah menebak MES0 (normal) sebagai radang aktif. Akurasi total drop ke 71.77%.<br>2. Merancang strategi V10 dengan mengawinkan kelebihan V8 (*Hierarchical Classification*) dengan kelebihan arsitektur V9 (*Mod-SE V2 / CBAM*).<br>3. Menyusun skrip `train_colonomind_v10_hierarchical_v2.py` yang membagi tugas menjadi dua *stage* (Detector & Grader) menggunakan arsitektur Mod-SE V2 secara murni (tanpa *Focal Loss*), dan menggabungkannya ke dalam *Super Agent LightGBM Hierarkis* di akhir tahap. |
+| **Hasil/Capaian** | Arsitektur hibrida ColonoMind V10 berhasil dirampungkan dan siap dieksekusi dari awal (*from scratch*) di *server* DGX. Skema ini secara teoritis akan menyaring bias MES0 di Tahap 1, membiarkan *CBAM Attention* bekerja optimal membedakan derajat radang di Tahap 2. |
+| **Kendala/Masalah** | Keterbatasan *Single-Stage Classification* dengan data super timpang: memaksa model mengenali kelas minoritas dengan penalti loss berat (Focal Loss) akan selalu menghasilkan *trade-off* berupa *False Positives* yang tinggi pada kelas mayoritas. |
+| **Solusi/Tindak Lanjut** | Meninggalkan sistem klasifikasi 4 kelas secara langsung dan kembali ke sistem terpisah 2-tahap (Deteksi lalu Grading) ala V8. |
+| **Dokumentasi (Link/Ref)** | `train_colonomind_v10_hierarchical_v2.py` |

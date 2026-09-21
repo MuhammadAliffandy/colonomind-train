@@ -109,3 +109,17 @@
 | **Kendala/Masalah** | Keterbatasan *Single-Stage Classification* dengan data super timpang: memaksa model mengenali kelas minoritas dengan penalti loss berat (Focal Loss) akan selalu menghasilkan *trade-off* berupa *False Positives* yang tinggi pada kelas mayoritas. |
 | **Solusi/Tindak Lanjut** | Meninggalkan sistem klasifikasi 4 kelas secara langsung dan kembali ke sistem terpisah 2-tahap (Deteksi lalu Grading) ala V8. |
 | **Dokumentasi (Link/Ref)** | `train_colonomind_v10_hierarchical_v2.py` |
+
+---
+
+## Log 21 September 2026
+
+| Parameter | Deskripsi |
+|---|---|
+| **Tanggal & Waktu** | 21 September 2026 |
+| **Rencana Harian** | Menganalisis *training log* V10 dan merancang **ColonoMind V11 (The Final Fusion)** untuk menyeimbangkan performa antar kelas secara absolut. |
+| **Aktivitas yang Dilakukan** | 1. Melakukan evaluasi mendalam terhadap metrik akhir V10. Ditemukan bahwa Akurasi kembali naik ke 77.72% dan F1-Score MES0 sukses mencapai 89.12% berkat perlindungan dari *Stage 1 Detector*.<br>2. Mengidentifikasi kelemahan di *Stage 2 Grader*: Tanpa *Focal Loss*, model kesulitan membedakan *hard examples* antara MES1 dan MES2, sehingga Recall MES1 anjlok ke 57%.<br>3. Mendesain arsitektur V11 dengan strategi **Hybrid Loss**: Menggunakan *Categorical Crossentropy* di Tahap 1 untuk melindungi MES0, dan menginjeksi kembali *Focal Loss* (dari V9) secara eksklusif ke Tahap 2 untuk memaksa model fokus pada detail radang ringan dan sedang. |
+| **Hasil/Capaian** | Selesai mengembangkan skrip `train_colonomind_v11_final_fusion.py`. Arsitektur ini adalah sintesis final dari seluruh keunggulan versi-versi sebelumnya: akurasi tinggi (dari V8), ketajaman *spatial attention* CBAM (dari V9), dan perlindungan bias kelas (dari hibrida *loss*). |
+| **Kendala/Masalah** | - |
+| **Solusi/Tindak Lanjut** | Siap mengeksekusi V11 di server DGX. Target utama: mencapai Akurasi \>80% tanpa mengorbankan Recall maupun Precision MES1. |
+| **Dokumentasi (Link/Ref)** | `train_colonomind_v11_final_fusion.py` |

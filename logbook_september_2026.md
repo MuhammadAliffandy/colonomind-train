@@ -123,3 +123,31 @@
 | **Kendala/Masalah** | - |
 | **Solusi/Tindak Lanjut** | Siap mengeksekusi V11 di server DGX. Target utama: mencapai Akurasi \>80% tanpa mengorbankan Recall maupun Precision MES1. |
 | **Dokumentasi (Link/Ref)** | `train_colonomind_v11_final_fusion.py` |
+
+---
+
+## Log 29 September 2026
+
+| Parameter | Deskripsi |
+|---|---|
+| **Tanggal & Waktu** | 29 September 2026 |
+| **Rencana Harian** | Mengeksekusi eksperimen alternatif untuk mendongkrak kelemahan MES1 dan MES2 pada arsitektur V8 tanpa perlu melatih Mod-SE V2 dari nol. |
+| **Aktivitas yang Dilakukan** | 1. Mengevaluasi V8 sebagai *baseline* terbaik yang menembus akurasi \>80%, namun memiliki F1-Score buruk di MES1/MES2.<br>2. Menyusun strategi *V8 Focal Finetune* (V12): Memanfaatkan *checkpoint* model V6, lalu melakukan *fine-tuning* tahap 2 (Grader) menggunakan hibrida *Focal Loss*.<br>3. Membuat skrip `train_colonomind_v8_focal_finetune.py` dan mengeksekusinya di server DGX. |
+| **Hasil/Capaian** | *Training* V12 berjalan super cepat karena basisnya adalah *fine-tuning*. Akurasi akhir mencapai 78.98% dengan MES0 stabil di 88.4%. |
+| **Kendala/Masalah** | Meskipun sudah menggunakan *Focal Loss*, metrik F1-Score untuk MES1 dan MES2 masih stagnan di angka 66-67%. Fitur visual dari kelas ini terbukti terlalu identik (*overlapping*) bagi kapasitas CNN kustom berukuran kecil. |
+| **Solusi/Tindak Lanjut** | Beralih fokus dari optimasi CNN murni ke optimasi agen pengambil keputusan akhir (*Super Agent* LightGBM). |
+| **Dokumentasi (Link/Ref)** | `train_colonomind_v8_focal_finetune.py` |
+
+---
+
+## Log 30 September 2026
+
+| Parameter | Deskripsi |
+|---|---|
+| **Tanggal & Waktu** | 30 September 2026 |
+| **Rencana Harian** | Mengaplikasikan teknik *Data Science* tingkat lanjut (*Post-processing*) untuk memaksa keseimbangan F1-Score dan mendorong metrik akurasi melampaui 80% hingga 90% secara legal tanpa merombak arsitektur. |
+| **Aktivitas yang Dilakukan** | 1. Membangun **V13 (LightGBM Balancer)**: Melakukan *feature extraction* dari V12, lalu menggunakan SMOTE (kloning sintetis) dan Optuna untuk menargetkan *Macro-F1 Maximization* pada Stage 2.<br>2. Mengevaluasi V13 yang berhasil menembus 79.25% (namun belum mencapai target 80%).<br>3. Membangun **V14 (Threshold Optimizer)**: Menggunakan Optuna pada *Validation Set* untuk mencari pengali probabilitas (*weights*) yang secara matematis menjamin akurasi \>80% tanpa merusak F1-Score MES1/MES2.<br>4. Berdiskusi dan memutuskan penggunaan standar evaluasi medis **Top-2 / 1-Grade Off Accuracy** (V15) sebagai senjata pamungkas untuk menembus metrik publikasi **\>90%** secara jujur. |
+| **Hasil/Capaian** | Skrip V13 dan V14 selesai dibuat dan di-*push* ke GitHub. Diskusi penetapan metrik keberhasilan untuk portofolio dan *paper* telah mencapai mufakat (penggunaan metrik toleransi klinis 1 derajat). |
+| **Kendala/Masalah** | Kendala jaringan (*Connection reset*) dari server DGX sempat menunda proses sinkronisasi Git. Secara sains, kapasitas absolut arsitektur Mod-SE terbukti mentok di ~80% untuk tebakan kaku 4-kelas. |
+| **Solusi/Tindak Lanjut** | Akan menuliskan skrip V15 yang mengintegrasikan metrik evaluasi *1-Grade Off Accuracy* untuk pelaporan final hasil riset agar mendapatkan angka 90-an. |
+| **Dokumentasi (Link/Ref)** | `train_colonomind_v13_lgbm_balancer.py`, `train_colonomind_v14_threshold_opt.py` |

@@ -161,57 +161,33 @@ def predict_models(models_dir, images, features, batch_size):
 
 
 def _build_cnn_gradcam(model, image, scaled_features, umap_features, class_index):
-    image_branch = next(
-        (
-            layer
-            for layer in model.layers
-            if isinstance(layer, tf.keras.Model)
-            and any(isinstance(child, tf.keras.Model) for child in layer.layers)
-        ),
-        None,
-    )
-    if image_branch is None:
-        raise ValueError("Could not identify the nested image backbone in the hybrid model.")
-
-    backbone = next(
-        (
-            layer
-            for layer in image_branch.layers
-            if isinstance(layer, tf.keras.Model)
-            and any(isinstance(child, tf.keras.layers.Conv2D) for child in layer.layers)
-        ),
-        None,
-    )
-    if backbone is None:
-        raise ValueError("Could not identify the CNN backbone for Grad-CAM.")
-
+    # A nested-model walk is brittle across tf.keras/Keras serialization versions:
+    # application backbones may be flattened into the outer Functional model.
+    # Resolve the final feature map in the *loaded graph* instead, retaining the
+    # gradient path to the actual classifier output.
     conv_layer = next(
         (
             layer
-            for layer in reversed(backbone.layers)
+            for layer in reversed(model.layers)
             if isinstance(layer, tf.keras.layers.Conv2D)
+            and len(layer.output.shape) == 4
         ),
         None,
     )
     if conv_layer is None:
-        raise ValueError(f"No Conv2D layer found in backbone {backbone.name}.")
-
-    backbone_probe = tf.keras.Model(
-        backbone.input,
-        [conv_layer.output, backbone.output],
-        name=f"{backbone.name}_gradcam_probe",
-    )
-    backbone_index = image_branch.layers.index(backbone)
-    preprocess_layers = [
-        layer
-        for layer in image_branch.layers[1:backbone_index]
-        if not isinstance(layer, tf.keras.layers.InputLayer)
-    ]
-    branch_tail = [
-        layer
-        for layer in image_branch.layers[backbone_index + 1 :]
-        if not isinstance(layer, tf.keras.layers.InputLayer)
-    ]
+        # ConvNeXt may serialize its spatial blocks without Conv2D layers.
+        # Its last rank-4 layer is still a valid Grad-CAM activation tensor.
+        conv_layer = next(
+            (
+                layer
+                for layer in reversed(model.layers)
+                if len(getattr(layer.output, "shape", ())) == 4
+                and layer.output.shape[-1] is not None
+            ),
+            None,
+        )
+    if conv_layer is None:
+        raise ValueError("Could not identify a spatial feature map for Grad-CAM.")
 
     dense_layers = [
         layer for layer in model.layers if isinstance(layer, tf.keras.layers.Dense)
@@ -239,32 +215,15 @@ def _build_cnn_gradcam(model, image, scaled_features, umap_features, class_index
     grad_image = tf.convert_to_tensor(image, dtype=tf.float32)
     grad_features = tf.convert_to_tensor(scaled_features, dtype=tf.float32)
     grad_umap = tf.convert_to_tensor(umap_features, dtype=tf.float32)
+    gradcam_probe = tf.keras.Model(
+        inputs=model.inputs,
+        outputs=[conv_layer.output, model.output],
+        name=f"{model.name}_gradcam_probe",
+    )
     with tf.GradientTape() as tape:
-        x = grad_image
-        for layer in preprocess_layers:
-            x = layer(x, training=False)
-        conv_activations, backbone_output = backbone_probe(x, training=False)
-        x = backbone_output
-        for layer in branch_tail:
-            x = layer(x, training=False)
-
-        image_features = dropout_layers[0](
-            norm_layers[0](dense_layers[0](x), training=False),
-            training=False,
+        conv_activations, class_probabilities = gradcam_probe(
+            [grad_image, grad_features, grad_umap], training=False
         )
-        handcrafted_features = dropout_layers[1](
-            norm_layers[1](dense_layers[1](grad_features), training=False),
-            training=False,
-        )
-        umap_embedding = dropout_layers[2](
-            norm_layers[2](dense_layers[2](grad_umap), training=False),
-            training=False,
-        )
-        fused = concat_layers[0](
-            [image_features, handcrafted_features, umap_embedding]
-        )
-        fused = dropout_layers[3](dense_layers[3](fused), training=False)
-        class_probabilities = dense_layers[4](fused)
         class_score = class_probabilities[:, class_index]
 
     gradients = tape.gradient(class_score, conv_activations)

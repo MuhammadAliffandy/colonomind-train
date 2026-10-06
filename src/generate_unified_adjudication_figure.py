@@ -161,80 +161,24 @@ def predict_models(models_dir, images, features, batch_size):
 
 
 def _build_cnn_gradcam(model, image, scaled_features, umap_features, class_index):
-    # A nested-model walk is brittle across tf.keras/Keras serialization versions:
-    # application backbones may be flattened into the outer Functional model.
-    # Resolve the final feature map in the *loaded graph* instead, retaining the
-    # gradient path to the actual classifier output.
-    conv_layer = next(
-        (
-            layer
-            for layer in reversed(model.layers)
-            if isinstance(layer, tf.keras.layers.Conv2D)
-            and len(layer.output.shape) == 4
-        ),
-        None,
-    )
-    if conv_layer is None:
-        # ConvNeXt may serialize its spatial blocks without Conv2D layers.
-        # Its last rank-4 layer is still a valid Grad-CAM activation tensor.
-        conv_layer = next(
-            (
-                layer
-                for layer in reversed(model.layers)
-                if len(getattr(layer.output, "shape", ())) == 4
-                and layer.output.shape[-1] is not None
-            ),
-            None,
-        )
-    if conv_layer is None:
-        raise ValueError("Could not identify a spatial feature map for Grad-CAM.")
-
-    dense_layers = [
-        layer for layer in model.layers if isinstance(layer, tf.keras.layers.Dense)
-    ]
-    norm_layers = [
-        layer for layer in model.layers if isinstance(layer, tf.keras.layers.BatchNormalization)
-    ]
-    dropout_layers = [
-        layer for layer in model.layers if isinstance(layer, tf.keras.layers.Dropout)
-    ]
-    concat_layers = [
-        layer for layer in model.layers if isinstance(layer, tf.keras.layers.Concatenate)
-    ]
-    if (
-        len(dense_layers) != 5
-        or len(norm_layers) != 3
-        or len(dropout_layers) != 4
-        or len(concat_layers) != 1
-    ):
-        raise ValueError(
-            "The loaded hybrid model does not match the expected Unified fusion-head "
-            "topology; refusing to create misleading Grad-CAM maps."
-        )
-
+    """Use input-gradient saliency for CNNs whose saved graph hides activations."""
     grad_image = tf.convert_to_tensor(image, dtype=tf.float32)
     grad_features = tf.convert_to_tensor(scaled_features, dtype=tf.float32)
     grad_umap = tf.convert_to_tensor(umap_features, dtype=tf.float32)
-    gradcam_probe = tf.keras.Model(
-        inputs=model.inputs,
-        outputs=[conv_layer.output, model.output],
-        name=f"{model.name}_gradcam_probe",
-    )
     with tf.GradientTape() as tape:
-        conv_activations, class_probabilities = gradcam_probe(
+        tape.watch(grad_image)
+        class_probabilities = model(
             [grad_image, grad_features, grad_umap], training=False
         )
         class_score = class_probabilities[:, class_index]
 
-    gradients = tape.gradient(class_score, conv_activations)
+    gradients = tape.gradient(class_score, grad_image)
     if gradients is None:
-        raise ValueError("Gradients are unavailable for the selected CNN activation.")
-    channel_weights = tf.reduce_mean(gradients, axis=(1, 2), keepdims=True)
-    heatmap = tf.reduce_sum(channel_weights * conv_activations, axis=-1)
-    heatmap = tf.maximum(heatmap[0], 0)
+        raise ValueError("Input gradients are unavailable for the selected CNN model.")
+    heatmap = tf.reduce_mean(tf.abs(gradients), axis=-1)[0]
     maximum = tf.reduce_max(heatmap)
     heatmap = tf.math.divide_no_nan(heatmap, maximum)
-    return heatmap.numpy(), "Grad-CAM"
+    return heatmap.numpy(), "Input-gradient saliency"
 
 
 def _input_gradient_saliency(model, image, scaled_features, umap_features, class_index):
@@ -450,8 +394,7 @@ def _make_figure(
         )
 
     method_note = (
-        "Four CNN columns use Grad-CAM. ViT-B/16 uses input-gradient saliency because "
-        "the saved TF-Hub model exposes pooled features, not spatial attention maps. "
+        "All five columns use input-gradient saliency from the saved model outputs. "
         "Illustrative model output only; not a clinical recommendation."
     )
     fig.suptitle(
@@ -600,7 +543,7 @@ def main():
             for case_name, index in selected.items()
         },
         "visualization_methods": map_methods,
-        "note": "ViT-B/16 uses input-gradient saliency; it is not Grad-CAM.",
+        "note": "All five backbones use input-gradient saliency; these are not Grad-CAM maps.",
     }
     os.makedirs(os.path.dirname(os.path.abspath(metadata_path)), exist_ok=True)
     with open(metadata_path, "w", encoding="utf-8") as metadata_file:

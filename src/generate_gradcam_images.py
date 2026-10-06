@@ -100,8 +100,8 @@ def main():
     last_conv_name = args.conv_layer
     if not last_conv_name:
         for layer in reversed(model.layers):
-            # Mencari layer 3D terakhir (biasanya Conv2D atau Activation sebelum GlobalAveragePooling)
-            if len(layer.output_shape) == 4:
+            # Aman: cari berdasarkan tipe layer (Conv2D) daripada output_shape yang sering error di Keras 3
+            if isinstance(layer, tf.keras.layers.Conv2D):
                 last_conv_name = layer.name
                 break
     print(f"Menggunakan layer: {last_conv_name} sebagai target ekstraksi Grad-CAM")

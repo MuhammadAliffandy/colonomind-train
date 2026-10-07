@@ -171,7 +171,7 @@ def _is_spatial_conv(layer):
     return isinstance(layer, conv_types) and len(output_shape) == 4
 
 
-def _standalone_backbone(model_name, input_shape, trained_backbone):
+def _standalone_backbone(model_name, input_shape, trained_candidates):
     builders = {
         "ResNet-50": tf.keras.applications.ResNet50,
         "DenseNet-121": tf.keras.applications.DenseNet121,
@@ -188,8 +188,24 @@ def _standalone_backbone(model_name, input_shape, trained_backbone):
         weights=None,
         input_shape=tuple(int(dimension) for dimension in input_shape[1:]),
     )
-    backbone.set_weights(trained_backbone.get_weights())
-    return backbone
+    expected_shapes = [tuple(weight.shape) for weight in backbone.get_weights()]
+    matching_candidates = [
+        candidate
+        for candidate in trained_candidates
+        if [tuple(weight.shape) for weight in candidate.get_weights()] == expected_shapes
+    ]
+    if not matching_candidates:
+        candidate_counts = [
+            (candidate.name, len(candidate.get_weights()))
+            for candidate in trained_candidates
+        ]
+        raise ValueError(
+            f"Could not match a complete saved {model_name} backbone to its standalone "
+            f"architecture. Expected {len(expected_shapes)} weights; candidates: "
+            f"{candidate_counts}."
+        )
+    backbone.set_weights(matching_candidates[0].get_weights())
+    return backbone, matching_candidates[0]
 
 
 def _build_cnn_gradcam(model, model_name, image, scaled_features, umap_features, class_index):
@@ -216,11 +232,10 @@ def _build_cnn_gradcam(model, model_name, image, scaled_features, umap_features,
     grad_umap = tf.convert_to_tensor(umap_features, dtype=tf.float32)
 
     if nested_backbones:
-        trained_backbone = nested_backbones[0]
-        backbone = _standalone_backbone(
+        backbone, trained_backbone = _standalone_backbone(
             model_name=model_name,
             input_shape=image.shape,
-            trained_backbone=trained_backbone,
+            trained_candidates=nested_backbones,
         )
         conv_layer = next(
             layer
@@ -231,7 +246,9 @@ def _build_cnn_gradcam(model, model_name, image, scaled_features, umap_features,
             backbone.input, [conv_layer.output, backbone.output]
         )
         branch_backbone_index = next(
-            index for index, layer in enumerate(branch.layers) if layer is trained_backbone
+            index
+            for index, layer in enumerate(branch.layers)
+            if layer is trained_backbone
         )
         x = grad_image
         for layer in branch.layers[1:branch_backbone_index]:

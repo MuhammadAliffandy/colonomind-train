@@ -12,13 +12,13 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
-from sklearn.model_selection import train_test_split
+from scipy.ndimage import gaussian_filter
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Register custom model layers and preprocessing functions before loading models.
 from src import dgx_models  # noqa: E402,F401
-from src.dgx_dataloader import load_all_images, load_tmc_ucm  # noqa: E402
+from src.dgx_dataloader import load_all_images  # noqa: E402
 from src.ensemble_adjudication import (  # noqa: E402
     CLASS_NAMES,
     select_figure_cases,
@@ -36,47 +36,25 @@ CLASS_COLORS = ("#b2182b", "#f4a582", "#d6604d", "#b2182b")
 CASE_ORDER = ("Unanimous", "Majority rescue", "Tie-break", "Safety fallback", "Ensemble error")
 
 
-def load_unified_test_data(base_dir, cache_dir=None):
-    """Recreate train_dgx.py's stratified Unified 20% holdout, including paths."""
-    dataset_paths = {
-        "NTUH": [
-            os.path.join(base_dir, "Dataset+Code", "MES classification_20250313"),
-            os.path.join(base_dir, "Dataset+Code", "MES classification_20250724"),
-        ],
-        "LIMUC": [
-            os.path.join(base_dir, "Dataset", "LIMUC", "train_and_validation_sets"),
-            os.path.join(base_dir, "Dataset", "LIMUC", "test_set"),
-        ],
-    }
-    tmc_root = os.path.join(base_dir, "Dataset", "TMC-UCM")
-
-    tmc = load_tmc_ucm(tmc_root, split_filter=None, cache_dir=cache_dir)
-    ntuh = load_all_images(dataset_paths["NTUH"], "NTUH", cache_dir=cache_dir)
-    limuc = load_all_images(dataset_paths["LIMUC"], "LIMUC", cache_dir=cache_dir)
-    all_images = tmc[0] + ntuh[0] + limuc[0]
-    all_features = tmc[1] + ntuh[1] + limuc[1]
-    all_labels = tmc[2] + ntuh[2] + limuc[2]
-    all_paths = tmc[3] + ntuh[3] + limuc[3]
-
-    _, test_images, _, test_features, _, test_labels, _, test_paths = train_test_split(
-        all_images,
-        all_features,
-        all_labels,
-        all_paths,
-        test_size=0.2,
-        random_state=42,
-        stratify=all_labels,
-    )
+def load_mixed_data(base_dir, cache_dir=None):
+    """Load real labeled examples from the mixed dataset in new_drive."""
+    mixed_root = os.path.join(base_dir, "Dataset+Code", "MES Mixed Data")
+    if not os.path.isdir(mixed_root):
+        raise FileNotFoundError(
+            f"Mixed dataset folder not found: {mixed_root}. Expected MES0-MES3 folders."
+        )
+    mixed = load_all_images([mixed_root], "Unified", cache_dir=cache_dir)
+    mixed_images, mixed_features, mixed_labels, mixed_paths = mixed
     label_to_index = {name: index for index, name in enumerate(CLASS_NAMES)}
-    unknown_labels = sorted(set(test_labels) - set(label_to_index))
+    unknown_labels = sorted(set(mixed_labels) - set(label_to_index))
     if unknown_labels:
-        raise ValueError(f"Unexpected Unified labels: {unknown_labels}")
+        raise ValueError(f"Unexpected mixed dataset labels: {unknown_labels}")
 
     return (
-        np.asarray(test_images, dtype=np.uint8),
-        np.asarray(test_features, dtype=np.float32),
-        np.asarray([label_to_index[label] for label in test_labels], dtype=np.int64),
-        test_paths,
+        np.asarray(mixed_images, dtype=np.uint8),
+        np.asarray(mixed_features, dtype=np.float32),
+        np.asarray([label_to_index[label] for label in mixed_labels], dtype=np.int64),
+        mixed_paths,
     )
 
 
@@ -160,7 +138,24 @@ def predict_models(models_dir, images, features, batch_size):
     return np.asarray(predictions), np.asarray(probabilities)
 
 
-def _build_cnn_gradcam(model, image, scaled_features, umap_features, class_index):
+def _smoothed_input_saliency(gradients, image):
+    heatmap = tf.reduce_mean(tf.abs(gradients), axis=-1)[0]
+    height, width = int(image.shape[1]), int(image.shape[2])
+    heatmap = tf.image.resize(
+        heatmap[tf.newaxis, ..., tf.newaxis],
+        (max(24, height // 8), max(24, width // 8)),
+        method="bilinear",
+    )[0, ..., 0]
+    heatmap = tf.image.resize(
+        heatmap[tf.newaxis, ..., tf.newaxis], (height, width), method="bilinear"
+    )[0, ..., 0]
+    heatmap = tf.pow(heatmap, 0.7)
+    heatmap = gaussian_filter(heatmap.numpy(), sigma=5.0)
+    scale = np.percentile(heatmap, 99)
+    return np.clip(heatmap / max(scale, 1e-8), 0, 1)
+
+
+def _cnn_input_saliency(model, image, scaled_features, umap_features, class_index):
     """Use input-gradient saliency for CNNs whose saved graph hides activations."""
     grad_image = tf.convert_to_tensor(image, dtype=tf.float32)
     grad_features = tf.convert_to_tensor(scaled_features, dtype=tf.float32)
@@ -175,10 +170,7 @@ def _build_cnn_gradcam(model, image, scaled_features, umap_features, class_index
     gradients = tape.gradient(class_score, grad_image)
     if gradients is None:
         raise ValueError("Input gradients are unavailable for the selected CNN model.")
-    heatmap = tf.reduce_mean(tf.abs(gradients), axis=-1)[0]
-    maximum = tf.reduce_max(heatmap)
-    heatmap = tf.math.divide_no_nan(heatmap, maximum)
-    return heatmap.numpy(), "Input-gradient saliency"
+    return _smoothed_input_saliency(gradients, image), "Smoothed input-gradient saliency"
 
 
 def _input_gradient_saliency(model, image, scaled_features, umap_features, class_index):
@@ -198,10 +190,7 @@ def _input_gradient_saliency(model, image, scaled_features, umap_features, class
     gradients = tape.gradient(score, image_tensor)
     if gradients is None:
         raise ValueError("Input gradients are unavailable for the ViT model.")
-    heatmap = tf.reduce_mean(tf.abs(gradients), axis=-1)[0]
-    maximum = tf.reduce_max(heatmap)
-    heatmap = tf.math.divide_no_nan(heatmap, maximum)
-    return heatmap.numpy(), "Input-gradient saliency"
+    return _smoothed_input_saliency(gradients, image), "Smoothed input-gradient saliency"
 
 
 def create_heatmap(model, model_name, image, scaled_features, umap_features, class_index):
@@ -209,7 +198,7 @@ def create_heatmap(model, model_name, image, scaled_features, umap_features, cla
         return _input_gradient_saliency(
             model, image, scaled_features, umap_features, class_index
         )
-    return _build_cnn_gradcam(
+    return _cnn_input_saliency(
         model, image, scaled_features, umap_features, class_index
     )
 
@@ -219,9 +208,11 @@ def _overlay(image, heatmap):
     resized = tf.image.resize(
         heatmap[..., np.newaxis], (height, width), method="bilinear"
     ).numpy()[..., 0]
-    color_map = plt.get_cmap("jet")(np.clip(resized, 0, 1))[..., :3]
+    normalized = np.clip(resized, 0, 1)
+    color_map = plt.get_cmap("jet")(normalized)[..., :3]
     original = np.clip(image / 255.0, 0, 1)
-    return np.clip(0.55 * original + 0.45 * color_map, 0, 1)
+    alpha = 0.68 * np.power(normalized, 0.75)
+    return np.clip(original * (1 - alpha[..., None]) + color_map * alpha[..., None], 0, 1)
 
 
 def _make_figure(
@@ -421,7 +412,7 @@ def _make_figure(
 def main():
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     parser = argparse.ArgumentParser(
-        description="Generate real Unified ensemble adjudication examples and heatmaps."
+        description="Generate mixed-dataset ensemble adjudication examples and saliency maps."
     )
     parser.add_argument(
         "--base-dir",
@@ -462,11 +453,11 @@ def main():
             "Missing Unified model artifacts:\n  " + "\n  ".join(required_artifacts)
         )
 
-    print("Recreating the exact stratified Unified 20% held-out split...")
-    images, features, labels, _ = load_unified_test_data(args.base_dir, args.cache_dir)
+    print("Loading labeled examples from the mixed dataset in new_drive...")
+    images, features, labels, image_paths = load_mixed_data(args.base_dir, args.cache_dir)
     if len(labels) == 0:
-        raise ValueError("Unified held-out data is empty; verify dataset paths and split files.")
-    print(f"Loaded {len(labels)} held-out images.")
+        raise ValueError("Mixed dataset is empty; verify its MES0-MES3 class folders.")
+    print(f"Loaded {len(labels)} mixed-dataset images.")
 
     predictions, probabilities = predict_models(
         args.models_dir, images, features, args.batch_size
@@ -521,12 +512,13 @@ def main():
 
     metadata_path = args.metadata or os.path.splitext(args.output)[0] + ".json"
     metadata = {
-        "scenario": "Unified",
+        "scenario": "Unified models evaluated on the mixed dataset",
         "models": list(MODEL_NAMES),
-        "test_split": "train_test_split(test_size=0.2, random_state=42, stratify=labels)",
+        "sample_source": os.path.join(args.base_dir, "Dataset+Code", "MES Mixed Data"),
         "selected_cases": {
             case_name: {
                 "test_index": int(index),
+                "image_path": image_paths[index],
                 "reference": CLASS_NAMES[int(labels[index])],
                 "model_predictions": {
                     model_name: CLASS_NAMES[int(predictions[model_index, index])]
@@ -543,7 +535,7 @@ def main():
             for case_name, index in selected.items()
         },
         "visualization_methods": map_methods,
-        "note": "All five backbones use input-gradient saliency; these are not Grad-CAM maps.",
+        "note": "All five backbones use smoothed input-gradient saliency, not Grad-CAM.",
     }
     os.makedirs(os.path.dirname(os.path.abspath(metadata_path)), exist_ok=True)
     with open(metadata_path, "w", encoding="utf-8") as metadata_file:

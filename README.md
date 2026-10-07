@@ -49,8 +49,8 @@ On the NTU DGX server, the following paths are pre-configured:
 | `mixed` | `MES Mixed Data` |
 
 ### Unified Five-Backbone Adjudication Figure
-Use the saved Unified models and the same stratified 20% holdout split as
-`train_dgx.py` to create real ensemble examples with CNN Grad-CAM overlays:
+Use the saved Unified models on the labeled mixed dataset in `new_drive` to
+create real ensemble examples with smoothed input-gradient saliency overlays:
 
 ```bash
 python src/generate_unified_adjudication_figure.py \
@@ -59,13 +59,13 @@ python src/generate_unified_adjudication_figure.py \
   --output /home/D13K48009/raid/Clara/colonomind-train/Result/Unified_Adjudication_Figure.png
 ```
 
-The script also writes a JSON metadata file beside the figure. It uses
-mean-probability tie-breaking for a 2:2 vote and a most-severe fallback when
-there is no majority. The ViT-B/16 artifact exposes pooled TF-Hub features, so
-its panel uses input-gradient saliency rather than claiming to be Grad-CAM.
-The figure is illustrative model output, not clinical advice. All five model
-weights plus their `base_scaler.pkl` and `umap_model.pkl` files must exist under
-the Unified experiment folders.
+The script also writes a JSON metadata file beside the figure. It reads images
+from `Dataset+Code/MES Mixed Data/MES0` through `MES3`, uses mean-probability
+tie-breaking for a 2:2 vote, and uses a most-severe fallback when there is no
+majority. Saliency is computed from each saved model's input gradients; it is
+not Grad-CAM. The figure is illustrative model output, not clinical advice. All
+five model weights plus their `base_scaler.pkl` and `umap_model.pkl` files must
+exist under the Unified experiment folders.
 
 ### 3. How to Train a Model
 You no longer need to copy/paste Jupyter Notebooks for new experiments! Use the unified `train.py` script. It automatically handles SMOTE balancing, UMAP projections, CNN training, and artifact saving.

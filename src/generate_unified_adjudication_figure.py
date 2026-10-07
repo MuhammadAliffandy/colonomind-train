@@ -171,7 +171,28 @@ def _is_spatial_conv(layer):
     return isinstance(layer, conv_types) and len(output_shape) == 4
 
 
-def _build_cnn_gradcam(model, image, scaled_features, umap_features, class_index):
+def _standalone_backbone(model_name, input_shape, trained_backbone):
+    builders = {
+        "ResNet-50": tf.keras.applications.ResNet50,
+        "DenseNet-121": tf.keras.applications.DenseNet121,
+        "EfficientNet-B4": tf.keras.applications.EfficientNetB4,
+        "ConvNeXt-Tiny": tf.keras.applications.ConvNeXtTiny,
+    }
+    try:
+        builder = builders[model_name]
+    except KeyError as error:
+        raise ValueError(f"No standalone CNN builder for {model_name}.") from error
+
+    backbone = builder(
+        include_top=False,
+        weights=None,
+        input_shape=tuple(int(dimension) for dimension in input_shape[1:]),
+    )
+    backbone.set_weights(trained_backbone.get_weights())
+    return backbone
+
+
+def _build_cnn_gradcam(model, model_name, image, scaled_features, umap_features, class_index):
     branch = next(
         (
             layer
@@ -195,7 +216,12 @@ def _build_cnn_gradcam(model, image, scaled_features, umap_features, class_index
     grad_umap = tf.convert_to_tensor(umap_features, dtype=tf.float32)
 
     if nested_backbones:
-        backbone = nested_backbones[0]
+        trained_backbone = nested_backbones[0]
+        backbone = _standalone_backbone(
+            model_name=model_name,
+            input_shape=image.shape,
+            trained_backbone=trained_backbone,
+        )
         conv_layer = next(
             layer
             for layer in reversed(backbone.layers)
@@ -205,7 +231,7 @@ def _build_cnn_gradcam(model, image, scaled_features, umap_features, class_index
             backbone.input, [conv_layer.output, backbone.output]
         )
         branch_backbone_index = next(
-            index for index, layer in enumerate(branch.layers) if layer is backbone
+            index for index, layer in enumerate(branch.layers) if layer is trained_backbone
         )
         x = grad_image
         for layer in branch.layers[1:branch_backbone_index]:
@@ -308,7 +334,7 @@ def create_heatmap(model, model_name, image, scaled_features, umap_features, cla
             model, image, scaled_features, umap_features, class_index
         )
     return _build_cnn_gradcam(
-        model, image, scaled_features, umap_features, class_index
+        model, model_name, image, scaled_features, umap_features, class_index
     )
 
 

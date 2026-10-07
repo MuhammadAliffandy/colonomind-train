@@ -194,18 +194,45 @@ def _standalone_backbone(model_name, input_shape, trained_candidates):
         for candidate in trained_candidates
         if [tuple(weight.shape) for weight in candidate.get_weights()] == expected_shapes
     ]
-    if not matching_candidates:
-        candidate_counts = [
-            (candidate.name, len(candidate.get_weights()))
-            for candidate in trained_candidates
-        ]
-        raise ValueError(
-            f"Could not match a complete saved {model_name} backbone to its standalone "
-            f"architecture. Expected {len(expected_shapes)} weights; candidates: "
-            f"{candidate_counts}."
+    if matching_candidates:
+        backbone.set_weights(matching_candidates[0].get_weights())
+        return backbone, matching_candidates[0]
+    return backbone, None
+
+
+def _copy_backbone_weights_by_name(backbone, source_branch):
+    source_layers = {}
+
+    def visit(parent):
+        for layer in getattr(parent, "layers", []):
+            source_layers.setdefault(layer.name, []).append(layer)
+            if isinstance(layer, tf.keras.Model):
+                visit(layer)
+
+    visit(source_branch)
+    missing = []
+    for target_layer in backbone.layers:
+        target_weights = target_layer.get_weights()
+        if not target_weights:
+            continue
+        target_shapes = [tuple(weight.shape) for weight in target_weights]
+        source = next(
+            (
+                candidate
+                for candidate in source_layers.get(target_layer.name, [])
+                if [tuple(weight.shape) for weight in candidate.get_weights()] == target_shapes
+            ),
+            None,
         )
-    backbone.set_weights(matching_candidates[0].get_weights())
-    return backbone, matching_candidates[0]
+        if source is None:
+            missing.append(target_layer.name)
+        else:
+            target_layer.set_weights(source.get_weights())
+    if missing:
+        raise ValueError(
+            f"Could not restore {len(missing)} weighted layers in the standalone "
+            f"backbone: {missing[:8]}."
+        )
 
 
 def _build_cnn_gradcam(model, model_name, image, scaled_features, umap_features, class_index):
@@ -237,6 +264,36 @@ def _build_cnn_gradcam(model, model_name, image, scaled_features, umap_features,
             input_shape=image.shape,
             trained_candidates=nested_backbones,
         )
+        if trained_backbone is None:
+            _copy_backbone_weights_by_name(backbone, branch)
+            last_augmentation_index = next(
+                (
+                    index
+                    for index in range(len(branch.layers) - 1, -1, -1)
+                    if isinstance(branch.layers[index], tf.keras.layers.RandomContrast)
+                ),
+                None,
+            )
+            if last_augmentation_index is None:
+                raise ValueError(f"Could not locate preprocessing layers in {branch.name}.")
+            branch_backbone_index = last_augmentation_index + 1
+            branch_tail_index = next(
+                (
+                    index
+                    for index, layer in enumerate(branch.layers[branch_backbone_index:], start=branch_backbone_index)
+                    if isinstance(layer, tf.keras.layers.GlobalAveragePooling2D)
+                ),
+                None,
+            )
+            if branch_tail_index is None:
+                raise ValueError(f"Could not locate the pooling layer after {model_name}.")
+        else:
+            branch_backbone_index = next(
+                index
+                for index, layer in enumerate(branch.layers)
+                if layer is trained_backbone
+            )
+            branch_tail_index = branch_backbone_index
         conv_layer = next(
             layer
             for layer in reversed(backbone.layers)
@@ -245,17 +302,12 @@ def _build_cnn_gradcam(model, model_name, image, scaled_features, umap_features,
         backbone_probe = tf.keras.Model(
             backbone.input, [conv_layer.output, backbone.output]
         )
-        branch_backbone_index = next(
-            index
-            for index, layer in enumerate(branch.layers)
-            if layer is trained_backbone
-        )
         x = grad_image
         for layer in branch.layers[1:branch_backbone_index]:
             x = layer(x, training=False)
         with tf.GradientTape() as tape:
             activations, x = backbone_probe(x, training=False)
-            for layer in branch.layers[branch_backbone_index + 1 :]:
+            for layer in branch.layers[branch_tail_index + (trained_backbone is not None) :]:
                 x = layer(x, training=False)
             class_probabilities = _apply_unified_fusion_head(
                 model, x, grad_features, grad_umap

@@ -202,15 +202,19 @@ def _standalone_backbone(model_name, input_shape, trained_candidates):
 
 def _copy_backbone_weights_by_name(backbone, source_branch):
     source_layers = {}
+    ordered_sources = []
 
     def visit(parent):
         for layer in getattr(parent, "layers", []):
             source_layers.setdefault(layer.name, []).append(layer)
+            if layer.get_weights():
+                ordered_sources.append(layer)
             if isinstance(layer, tf.keras.Model):
                 visit(layer)
 
     visit(source_branch)
     missing = []
+    used_sources = set()
     for target_layer in backbone.layers:
         target_weights = target_layer.get_weights()
         if not target_weights:
@@ -220,14 +224,27 @@ def _copy_backbone_weights_by_name(backbone, source_branch):
             (
                 candidate
                 for candidate in source_layers.get(target_layer.name, [])
+                if id(candidate) not in used_sources
                 if [tuple(weight.shape) for weight in candidate.get_weights()] == target_shapes
             ),
             None,
         )
         if source is None:
+            source = next(
+                (
+                    candidate
+                    for candidate in ordered_sources
+                    if id(candidate) not in used_sources
+                    and [tuple(weight.shape) for weight in candidate.get_weights()]
+                    == target_shapes
+                ),
+                None,
+            )
+        if source is None:
             missing.append(target_layer.name)
         else:
             target_layer.set_weights(source.get_weights())
+            used_sources.add(id(source))
     if missing:
         raise ValueError(
             f"Could not restore {len(missing)} weighted layers in the standalone "

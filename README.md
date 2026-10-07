@@ -50,7 +50,8 @@ On the NTU DGX server, the following paths are pre-configured:
 
 ### Unified Five-Backbone Adjudication Figure
 Use the saved Unified models on the labeled mixed dataset in `new_drive` to
-create real ensemble examples with smoothed input-gradient saliency overlays:
+create real ensemble examples with CNN Grad-CAM overlays. ViT uses
+input-gradient saliency because its saved TF-Hub model exposes pooled features:
 
 ```bash
 python src/generate_unified_adjudication_figure.py \
@@ -62,10 +63,11 @@ python src/generate_unified_adjudication_figure.py \
 The script also writes a JSON metadata file beside the figure. It reads images
 from `Dataset+Code/MES Mixed Data/MES0` through `MES3`, uses mean-probability
 tie-breaking for a 2:2 vote, and uses a most-severe fallback when there is no
-majority. Saliency is computed from each saved model's input gradients; it is
-not Grad-CAM. The figure is illustrative model output, not clinical advice. All
-five model weights plus their `base_scaler.pkl` and `umap_model.pkl` files must
-exist under the Unified experiment folders.
+majority. The four CNN backbones use Grad-CAM to localize image regions that
+contribute to the selected MES prediction; ViT uses input-gradient saliency.
+These are illustrative model outputs, not clinical advice. All five model
+weights plus their `base_scaler.pkl` and `umap_model.pkl` files must exist under
+the Unified experiment folders.
 
 ### 3. How to Train a Model
 You no longer need to copy/paste Jupyter Notebooks for new experiments! Use the unified `train.py` script. It automatically handles SMOTE balancing, UMAP projections, CNN training, and artifact saving.

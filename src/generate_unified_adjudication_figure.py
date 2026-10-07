@@ -131,7 +131,7 @@ def predict_models(models_dir, images, features, batch_size):
         model_probabilities = np.concatenate(model_probabilities, axis=0)
         probabilities.append(model_probabilities)
         predictions.append(np.argmax(model_probabilities, axis=1))
-        print(f"  Inferred {len(model_probabilities)} held-out images.")
+        print(f"  Inferred {len(model_probabilities)} input images.")
         del model, scaler, umap_model, scaled_features, umap_features
         tf.keras.backend.clear_session()
 
@@ -155,22 +155,131 @@ def _smoothed_input_saliency(gradients, image):
     return np.clip(heatmap / max(scale, 1e-8), 0, 1)
 
 
-def _cnn_input_saliency(model, image, scaled_features, umap_features, class_index):
-    """Use input-gradient saliency for CNNs whose saved graph hides activations."""
+def _nested_models(parent):
+    """Yield nested Keras models from deepest to shallowest."""
+    found = []
+    for layer in getattr(parent, "layers", []):
+        if isinstance(layer, tf.keras.Model):
+            found.extend(_nested_models(layer))
+            found.append(layer)
+    return found
+
+
+def _is_spatial_conv(layer):
+    conv_types = (tf.keras.layers.Conv2D, tf.keras.layers.DepthwiseConv2D)
+    output_shape = getattr(getattr(layer, "output", None), "shape", ())
+    return isinstance(layer, conv_types) and len(output_shape) == 4
+
+
+def _build_cnn_gradcam(model, image, scaled_features, umap_features, class_index):
+    branch = next(
+        (
+            layer
+            for layer in model.layers
+            if isinstance(layer, tf.keras.Model)
+            and layer.name.lower().endswith("_branch")
+        ),
+        None,
+    )
+    if branch is None:
+        raise ValueError("Could not identify the CNN image branch in the saved model.")
+
+    nested_backbones = [
+        candidate
+        for candidate in _nested_models(branch)
+        if len(getattr(candidate.output, "shape", ())) == 4
+        and any(_is_spatial_conv(layer) for layer in candidate.layers)
+    ]
     grad_image = tf.convert_to_tensor(image, dtype=tf.float32)
     grad_features = tf.convert_to_tensor(scaled_features, dtype=tf.float32)
     grad_umap = tf.convert_to_tensor(umap_features, dtype=tf.float32)
-    with tf.GradientTape() as tape:
-        tape.watch(grad_image)
-        class_probabilities = model(
-            [grad_image, grad_features, grad_umap], training=False
-        )
-        class_score = class_probabilities[:, class_index]
 
-    gradients = tape.gradient(class_score, grad_image)
+    if nested_backbones:
+        backbone = nested_backbones[0]
+        conv_layer = next(
+            layer
+            for layer in reversed(backbone.layers)
+            if _is_spatial_conv(layer)
+        )
+        backbone_probe = tf.keras.Model(
+            backbone.input, [conv_layer.output, backbone.output]
+        )
+        branch_backbone_index = next(
+            index for index, layer in enumerate(branch.layers) if layer is backbone
+        )
+        x = grad_image
+        for layer in branch.layers[1:branch_backbone_index]:
+            x = layer(x, training=False)
+        with tf.GradientTape() as tape:
+            activations, x = backbone_probe(x, training=False)
+            for layer in branch.layers[branch_backbone_index + 1 :]:
+                x = layer(x, training=False)
+            class_probabilities = _apply_unified_fusion_head(
+                model, x, grad_features, grad_umap
+            )
+            score = class_probabilities[:, class_index]
+    else:
+        conv_layer = next(
+            (
+                layer
+                for layer in reversed(branch.layers)
+                if _is_spatial_conv(layer)
+            ),
+            None,
+        )
+        if conv_layer is None:
+            raise ValueError(f"No spatial Conv2D feature map found in {branch.name}.")
+        branch_probe = tf.keras.Model(
+            branch.input, [conv_layer.output, branch.output]
+        )
+        with tf.GradientTape() as tape:
+            activations, branch_features = branch_probe(grad_image, training=False)
+            class_probabilities = _apply_unified_fusion_head(
+                model, branch_features, grad_features, grad_umap
+            )
+            score = class_probabilities[:, class_index]
+
+    gradients = tape.gradient(score, activations)
     if gradients is None:
-        raise ValueError("Input gradients are unavailable for the selected CNN model.")
-    return _smoothed_input_saliency(gradients, image), "Smoothed input-gradient saliency"
+        raise ValueError(
+            f"Grad-CAM gradient is disconnected for the {branch.name} feature map."
+        )
+    weights = tf.reduce_mean(gradients, axis=(1, 2), keepdims=True)
+    heatmap = tf.nn.relu(tf.reduce_sum(weights * activations, axis=-1))[0]
+    heatmap = tf.image.resize(
+        heatmap[tf.newaxis, ..., tf.newaxis],
+        (int(image.shape[1]), int(image.shape[2])),
+        method="bilinear",
+    )[0, ..., 0]
+    maximum = tf.reduce_max(heatmap)
+    heatmap = tf.math.divide_no_nan(heatmap, maximum)
+    heatmap = gaussian_filter(heatmap.numpy(), sigma=2.5)
+    scale = np.percentile(heatmap, 99)
+    return np.clip(heatmap / max(scale, 1e-8), 0, 1), "Grad-CAM"
+
+
+def _apply_unified_fusion_head(model, image_features, scaled_features, umap_features):
+    dense_layers = [layer for layer in model.layers if isinstance(layer, tf.keras.layers.Dense)]
+    norm_layers = [layer for layer in model.layers if isinstance(layer, tf.keras.layers.BatchNormalization)]
+    dropout_layers = [layer for layer in model.layers if isinstance(layer, tf.keras.layers.Dropout)]
+    concat_layer = next(
+        layer for layer in model.layers if isinstance(layer, tf.keras.layers.Concatenate)
+    )
+    if len(dense_layers) != 5 or len(norm_layers) != 3 or len(dropout_layers) != 4:
+        raise ValueError("Saved model does not match the expected Unified fusion head.")
+
+    image_features = dropout_layers[0](
+        norm_layers[0](dense_layers[0](image_features), training=False), training=False
+    )
+    handcrafted = dropout_layers[1](
+        norm_layers[1](dense_layers[1](scaled_features), training=False), training=False
+    )
+    embedding = dropout_layers[2](
+        norm_layers[2](dense_layers[2](umap_features), training=False), training=False
+    )
+    fused = concat_layer([image_features, handcrafted, embedding])
+    fused = dropout_layers[3](dense_layers[3](fused), training=False)
+    return dense_layers[4](fused)
 
 
 def _input_gradient_saliency(model, image, scaled_features, umap_features, class_index):
@@ -198,7 +307,7 @@ def create_heatmap(model, model_name, image, scaled_features, umap_features, cla
         return _input_gradient_saliency(
             model, image, scaled_features, umap_features, class_index
         )
-    return _cnn_input_saliency(
+    return _build_cnn_gradcam(
         model, image, scaled_features, umap_features, class_index
     )
 
@@ -385,8 +494,8 @@ def _make_figure(
         )
 
     method_note = (
-        "All five columns use input-gradient saliency from the saved model outputs. "
-        "Illustrative model output only; not a clinical recommendation."
+        "CNN backbones use Grad-CAM; ViT-B/16 uses input-gradient saliency because "
+        "the saved TF-Hub model exposes pooled features. Illustrative model output only."
     )
     fig.suptitle(
         "Unified Five-Backbone Ensemble Adjudication",
@@ -535,7 +644,7 @@ def main():
             for case_name, index in selected.items()
         },
         "visualization_methods": map_methods,
-        "note": "All five backbones use smoothed input-gradient saliency, not Grad-CAM.",
+        "note": "CNN backbones use Grad-CAM; ViT-B/16 uses input-gradient saliency.",
     }
     os.makedirs(os.path.dirname(os.path.abspath(metadata_path)), exist_ok=True)
     with open(metadata_path, "w", encoding="utf-8") as metadata_file:

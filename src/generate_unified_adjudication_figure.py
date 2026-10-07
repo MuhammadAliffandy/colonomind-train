@@ -436,6 +436,18 @@ def _overlay(image, heatmap):
     return np.clip(original * (1 - alpha[..., None]) + color_map * alpha[..., None], 0, 1)
 
 
+def _center_crop_zoom(image, zoom):
+    """Crop only the displayed view, preserving full-frame model inference."""
+    if zoom <= 1:
+        return image
+    height, width = image.shape[:2]
+    crop_height = max(1, int(round(height / zoom)))
+    crop_width = max(1, int(round(width / zoom)))
+    top = (height - crop_height) // 2
+    left = (width - crop_width) // 2
+    return image[top : top + crop_height, left : left + crop_width]
+
+
 def _make_figure(
     output_path,
     images,
@@ -445,6 +457,7 @@ def _make_figure(
     selected,
     adjudications,
     heatmaps,
+    figure_zoom,
 ):
     column_titles = [
         "Case",
@@ -514,7 +527,8 @@ def _make_figure(
         )
 
         reference_axis = fig.add_subplot(grid[row, 1])
-        reference_axis.imshow(np.clip(images[sample_index] / 255.0, 0, 1))
+        reference_image = _center_crop_zoom(images[sample_index], figure_zoom)
+        reference_axis.imshow(np.clip(reference_image / 255.0, 0, 1))
         reference_axis.set_title(CLASS_NAMES[true_label], fontsize=8, pad=3)
         reference_axis.axis("off")
 
@@ -657,10 +671,18 @@ def main():
     )
     parser.add_argument("--cache-dir", default=None)
     parser.add_argument("--batch-size", type=int, default=8)
+    parser.add_argument(
+        "--figure-zoom",
+        type=float,
+        default=1.2,
+        help="Center crop for displayed images and aligned heatmaps; does not affect inference.",
+    )
     args = parser.parse_args()
 
     if args.batch_size < 1:
         parser.error("--batch-size must be at least 1.")
+    if args.figure_zoom < 1.0 or args.figure_zoom > 2.0:
+        parser.error("--figure-zoom must be between 1.0 and 2.0.")
     if not os.path.isdir(args.models_dir):
         raise FileNotFoundError(f"Unified model directory does not exist: {args.models_dir}")
     required_artifacts = [
@@ -711,8 +733,12 @@ def main():
                 umap_features[case_row : case_row + 1],
                 int(predictions[model_index, sample_index]),
             )
+            display_image = _center_crop_zoom(
+                sample_image[0].numpy(), args.figure_zoom
+            )
+            display_heatmap = _center_crop_zoom(heatmap, args.figure_zoom)
             heatmaps[model_name][sample_index] = _overlay(
-                sample_image[0].numpy(), heatmap
+                display_image, display_heatmap
             )
             map_methods[model_name] = method
             print(f"Prepared {case_name} with {model_name}.")
@@ -728,6 +754,7 @@ def main():
         selected,
         adjudications,
         heatmaps,
+        args.figure_zoom,
     )
     print(f"Figure saved to: {args.output}")
 
@@ -736,6 +763,8 @@ def main():
         "scenario": "Unified models evaluated on the mixed dataset",
         "models": list(MODEL_NAMES),
         "sample_source": os.path.join(args.base_dir, "Dataset+Code", "MES Mixed Data"),
+        "figure_zoom": args.figure_zoom,
+        "figure_zoom_applies_to": "display and aligned heatmap only; inference inputs are unchanged",
         "selected_cases": {
             case_name: {
                 "test_index": int(index),

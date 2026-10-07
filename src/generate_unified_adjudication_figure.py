@@ -12,6 +12,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
+import cv2
 from scipy.ndimage import gaussian_filter
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -448,9 +449,41 @@ def _center_crop_zoom(image, zoom):
     return image[top : top + crop_height, left : left + crop_width]
 
 
+def _legacy_endoscopy_crop(image_path, resized_image):
+    """Apply the repository's older right-shifted crop for figure display."""
+    raw_bgr = cv2.imread(image_path)
+    if raw_bgr is None:
+        raise ValueError(f"Could not read selected image for figure: {image_path}")
+    raw_image = cv2.cvtColor(raw_bgr, cv2.COLOR_BGR2RGB)
+    raw_height, raw_width = raw_image.shape[:2]
+    if raw_height > 450 and raw_width > 550:
+        y0, y1, x0, x1 = 30, min(430, raw_height), 200, min(550, raw_width)
+    else:
+        y0, y1, x0, x1 = 0, raw_height, 0, raw_width
+
+    model_height, model_width = resized_image.shape[:2]
+    bounds = (
+        int(round(y0 * model_height / raw_height)),
+        int(round(y1 * model_height / raw_height)),
+        int(round(x0 * model_width / raw_width)),
+        int(round(x1 * model_width / raw_width)),
+    )
+    cropped = raw_image[y0:y1, x0:x1]
+    display_image = cv2.resize(cropped, (model_width, model_height), interpolation=cv2.INTER_AREA)
+    return display_image, bounds
+
+
+def _crop_heatmap_to_bounds(heatmap, bounds, output_shape):
+    top, bottom, left, right = bounds
+    cropped = heatmap[top:bottom, left:right]
+    return tf.image.resize(
+        cropped[..., np.newaxis], output_shape, method="bilinear"
+    ).numpy()[..., 0]
+
+
 def _make_figure(
     output_path,
-    images,
+    display_images,
     labels,
     predictions,
     probabilities,
@@ -527,7 +560,7 @@ def _make_figure(
         )
 
         reference_axis = fig.add_subplot(grid[row, 1])
-        reference_image = _center_crop_zoom(images[sample_index], figure_zoom)
+        reference_image = _center_crop_zoom(display_images[sample_index], figure_zoom)
         reference_axis.imshow(np.clip(reference_image / 255.0, 0, 1))
         reference_axis.set_title(CLASS_NAMES[true_label], fontsize=8, pad=3)
         reference_axis.axis("off")
@@ -674,8 +707,8 @@ def main():
     parser.add_argument(
         "--figure-zoom",
         type=float,
-        default=1.2,
-        help="Center crop for displayed images and aligned heatmaps; does not affect inference.",
+        default=1.0,
+        help="Optional extra center crop after the legacy display crop; does not affect inference.",
     )
     args = parser.parse_args()
 
@@ -711,6 +744,13 @@ def main():
     map_methods = {}
     selected_indices = [selected[name] for name in CASE_ORDER]
     selected_features = features[selected_indices]
+    display_images = {}
+    crop_bounds = {}
+    for sample_index in selected_indices:
+        display_images[sample_index], crop_bounds[sample_index] = _legacy_endoscopy_crop(
+            image_paths[sample_index], images[sample_index]
+        )
+
     for model_index, model_name in enumerate(MODEL_NAMES):
         paths = _model_artifact_paths(args.models_dir, model_name)
         model = _load_hybrid_model(paths["model"])
@@ -734,9 +774,12 @@ def main():
                 int(predictions[model_index, sample_index]),
             )
             display_image = _center_crop_zoom(
-                sample_image[0].numpy(), args.figure_zoom
+                display_images[sample_index], args.figure_zoom
             )
-            display_heatmap = _center_crop_zoom(heatmap, args.figure_zoom)
+            aligned_heatmap = _crop_heatmap_to_bounds(
+                heatmap, crop_bounds[sample_index], display_images[sample_index].shape[:2]
+            )
+            display_heatmap = _center_crop_zoom(aligned_heatmap, args.figure_zoom)
             heatmaps[model_name][sample_index] = _overlay(
                 display_image, display_heatmap
             )
@@ -747,7 +790,7 @@ def main():
 
     _make_figure(
         args.output,
-        images,
+        display_images,
         labels,
         predictions,
         probabilities,
@@ -764,10 +807,11 @@ def main():
         "models": list(MODEL_NAMES),
         "sample_source": os.path.join(args.base_dir, "Dataset+Code", "MES Mixed Data"),
         "figure_zoom": args.figure_zoom,
-        "figure_zoom_applies_to": "display and aligned heatmap only; inference inputs are unchanged",
+        "display_crop": "legacy crop [30:430, 200:550] when raw image height>450 and width>550",
+        "display_crop_applies_to": "figure and aligned heatmaps only; inference inputs are unchanged",
         "selected_cases": {
             case_name: {
-                "test_index": int(index),
+                "mixed_dataset_index": int(index),
                 "image_path": image_paths[index],
                 "reference": CLASS_NAMES[int(labels[index])],
                 "model_predictions": {

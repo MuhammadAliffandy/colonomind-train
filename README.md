@@ -65,8 +65,11 @@ from `Dataset+Code/MES Mixed Data/MES0` through `MES3`, uses mean-probability
 tie-breaking for a 2:2 vote, and uses a most-severe fallback when there is no
 majority. The four CNN backbones use Grad-CAM to localize image regions that
 contribute to the selected MES prediction; ViT uses input-gradient saliency.
-The figure center-crops the display by 1.2x to reduce border overlays while
-keeping inference on the original full frame; adjust it with `--figure-zoom`.
+For display, the figure reuses the repository's legacy crop `[30:430, 200:550]`
+for raw images larger than 450×550 pixels. This crop shifts the view right to
+remove the left-side patient overlay. Heatmaps are cropped to the same bounds;
+model inference still uses the original full frame. An optional extra crop is
+controlled by `--figure-zoom`.
 These are illustrative model outputs, not clinical advice. All five model
 weights plus their `base_scaler.pkl` and `umap_model.pkl` files must exist under
 the Unified experiment folders.

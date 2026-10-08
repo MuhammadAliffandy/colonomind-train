@@ -19,9 +19,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Register custom model layers and preprocessing functions before loading models.
 from src import dgx_models  # noqa: E402,F401
-from src.dgx_dataloader import load_all_images  # noqa: E402
+from src.dgx_dataloader import load_all_images, process_single_image  # noqa: E402
 from src.ensemble_adjudication import (  # noqa: E402
     CLASS_NAMES,
+    adjudicate,
     select_figure_cases,
 )
 
@@ -56,6 +57,55 @@ def load_mixed_data(base_dir, cache_dir=None):
         np.asarray(mixed_features, dtype=np.float32),
         np.asarray([label_to_index[label] for label in mixed_labels], dtype=np.int64),
         mixed_paths,
+    )
+
+
+def load_explicit_samples(base_dir, sample_list_path):
+    """Load a small, user-curated list of paths relative to Dataset+Code."""
+    dataset_root = os.path.join(base_dir, "Dataset+Code")
+    with open(sample_list_path, "r", encoding="utf-8") as sample_file:
+        relative_paths = [
+            line.strip()
+            for line in sample_file
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+    if not relative_paths:
+        raise ValueError(f"No image paths found in sample list: {sample_list_path}")
+
+    images, features, labels, paths = [], [], [], []
+    label_to_index = {name: index for index, name in enumerate(CLASS_NAMES)}
+    for relative_path in relative_paths:
+        relative_path = relative_path.removeprefix("Dataset+Code/")
+        if relative_path.startswith("./"):
+            relative_path = relative_path[2:]
+        if os.path.isabs(relative_path):
+            raise ValueError("Sample paths must be relative to Dataset+Code/.")
+        image_path = os.path.join(dataset_root, relative_path)
+        if os.path.commonpath((dataset_root, os.path.abspath(image_path))) != os.path.abspath(
+            dataset_root
+        ):
+            raise ValueError("Sample paths must stay inside Dataset+Code/.")
+        if not os.path.isfile(image_path):
+            raise FileNotFoundError(f"Selected figure image does not exist: {image_path}")
+        class_name = os.path.basename(os.path.dirname(image_path))
+        if class_name not in label_to_index:
+            raise ValueError(
+                f"Expected a MES0-MES3 parent folder for selected image: {image_path}"
+            )
+        processed = process_single_image(image_path, class_name)
+        if processed is None:
+            raise ValueError(f"Could not preprocess selected figure image: {image_path}")
+        image, feature, label, resolved_path = processed
+        images.append(image)
+        features.append(feature)
+        labels.append(label_to_index[label])
+        paths.append(resolved_path)
+
+    return (
+        np.asarray(images, dtype=np.uint8),
+        np.asarray(features, dtype=np.float32),
+        np.asarray(labels, dtype=np.int64),
+        paths,
     )
 
 
@@ -491,6 +541,7 @@ def _make_figure(
     adjudications,
     heatmaps,
     figure_zoom,
+    case_order,
 ):
     column_titles = [
         "Case",
@@ -505,9 +556,9 @@ def _make_figure(
     ]
     fig = plt.figure(figsize=(21, 12), facecolor="white")
     grid = fig.add_gridspec(
-        len(CASE_ORDER) + 1,
+        len(case_order) + 1,
         len(column_titles),
-        height_ratios=[0.32] + [1] * len(CASE_ORDER),
+        height_ratios=[0.32] + [1] * len(case_order),
         width_ratios=[0.9, 0.85, 1, 1, 1, 1, 1, 1.35, 1.05],
         hspace=0.10,
         wspace=0.08,
@@ -532,7 +583,7 @@ def _make_figure(
             wrap=True,
         )
 
-    for row, case_name in enumerate(CASE_ORDER, start=1):
+    for row, case_name in enumerate(case_order, start=1):
         sample_index = selected[case_name]
         true_label = int(labels[sample_index])
         result = adjudications[sample_index]
@@ -705,6 +756,11 @@ def main():
     parser.add_argument("--cache-dir", default=None)
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument(
+        "--sample-list",
+        default=None,
+        help="Optional server-local text file of image paths relative to Dataset+Code/.",
+    )
+    parser.add_argument(
         "--figure-zoom",
         type=float,
         default=1.0,
@@ -729,20 +785,39 @@ def main():
             "Missing Unified model artifacts:\n  " + "\n  ".join(required_artifacts)
         )
 
-    print("Loading labeled examples from the mixed dataset in new_drive...")
-    images, features, labels, image_paths = load_mixed_data(args.base_dir, args.cache_dir)
+    if args.sample_list:
+        print(f"Loading explicit figure samples from {args.sample_list}...")
+        images, features, labels, image_paths = load_explicit_samples(
+            args.base_dir, args.sample_list
+        )
+        case_order = tuple(f"Sample {index + 1}" for index in range(len(labels)))
+    else:
+        print("Loading labeled examples from the mixed dataset in new_drive...")
+        images, features, labels, image_paths = load_mixed_data(args.base_dir, args.cache_dir)
+        case_order = CASE_ORDER
     if len(labels) == 0:
         raise ValueError("Mixed dataset is empty; verify its MES0-MES3 class folders.")
-    print(f"Loaded {len(labels)} mixed-dataset images.")
+    source_label = "curated" if args.sample_list else "mixed-dataset"
+    print(f"Loaded {len(labels)} {source_label} images.")
 
     predictions, probabilities = predict_models(
         args.models_dir, images, features, args.batch_size
     )
-    selected, adjudications = select_figure_cases(labels, predictions, probabilities)
+    if args.sample_list:
+        selected = {case_name: index for index, case_name in enumerate(case_order)}
+        adjudications = [
+            adjudicate(
+                [model_predictions[index] for model_predictions in predictions],
+                [model_probabilities[index] for model_probabilities in probabilities],
+            )
+            for index in range(len(labels))
+        ]
+    else:
+        selected, adjudications = select_figure_cases(labels, predictions, probabilities)
 
     heatmaps = {name: {} for name in MODEL_NAMES}
     map_methods = {}
-    selected_indices = [selected[name] for name in CASE_ORDER]
+    selected_indices = [selected[name] for name in case_order]
     selected_features = features[selected_indices]
     display_images = {}
     crop_bounds = {}
@@ -758,7 +833,7 @@ def main():
         umap_model = joblib.load(paths["umap"])
         scaled_features = scaler.transform(selected_features)
         umap_features = umap_model.transform(scaled_features)
-        for case_row, case_name in enumerate(CASE_ORDER):
+        for case_row, case_name in enumerate(case_order):
             sample_index = selected[case_name]
             image_shape = model.inputs[0].shape
             image_height, image_width = int(image_shape[1]), int(image_shape[2])
@@ -798,21 +873,29 @@ def main():
         adjudications,
         heatmaps,
         args.figure_zoom,
+        case_order,
     )
     print(f"Figure saved to: {args.output}")
 
     metadata_path = args.metadata or os.path.splitext(args.output)[0] + ".json"
     metadata = {
-        "scenario": "Unified models evaluated on the mixed dataset",
+        "scenario": (
+            "Curated illustrative examples from MES classification_20250724"
+            if args.sample_list
+            else "Unified models evaluated on the mixed dataset"
+        ),
         "models": list(MODEL_NAMES),
-        "sample_source": os.path.join(args.base_dir, "Dataset+Code", "MES Mixed Data"),
+        "sample_source": (
+            "Explicit server-local sample list relative to Dataset+Code/"
+            if args.sample_list
+            else os.path.join(args.base_dir, "Dataset+Code", "MES Mixed Data")
+        ),
         "figure_zoom": args.figure_zoom,
         "display_crop": "legacy crop [30:430, 200:550] when raw image height>450 and width>550",
         "display_crop_applies_to": "figure and aligned heatmaps only; inference inputs are unchanged",
         "selected_cases": {
             case_name: {
-                "mixed_dataset_index": int(index),
-                "image_path": image_paths[index],
+                "dataset_index": int(index),
                 "reference": CLASS_NAMES[int(labels[index])],
                 "model_predictions": {
                     model_name: CLASS_NAMES[int(predictions[model_index, index])]
@@ -829,7 +912,13 @@ def main():
             for case_name, index in selected.items()
         },
         "visualization_methods": map_methods,
-        "note": "CNN backbones use Grad-CAM; ViT-B/16 uses input-gradient saliency.",
+        "note": (
+            "Illustrative examples only; they may overlap training data and are not an "
+            "independent test set. CNN backbones use Grad-CAM; ViT-B/16 uses "
+            "input-gradient saliency."
+            if args.sample_list
+            else "CNN backbones use Grad-CAM; ViT-B/16 uses input-gradient saliency."
+        ),
     }
     os.makedirs(os.path.dirname(os.path.abspath(metadata_path)), exist_ok=True)
     with open(metadata_path, "w", encoding="utf-8") as metadata_file:

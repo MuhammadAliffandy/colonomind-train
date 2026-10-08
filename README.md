@@ -70,6 +70,12 @@ for raw images larger than 450×550 pixels. This crop shifts the view right to
 remove the left-side patient overlay. Heatmaps are cropped to the same bounds;
 model inference still uses the original full frame. An optional extra crop is
 controlled by `--figure-zoom`.
+
+To create an editorial figure from a fixed, manually reviewed set of examples,
+pass a server-local text file with one path per line, relative to
+`Dataset+Code/`. Keep patient-specific filenames out of Git. These curated
+examples are for illustration and must not be presented as an independent test
+set or used to estimate model performance.
 These are illustrative model outputs, not clinical advice. All five model
 weights plus their `base_scaler.pkl` and `umap_model.pkl` files must exist under
 the Unified experiment folders.

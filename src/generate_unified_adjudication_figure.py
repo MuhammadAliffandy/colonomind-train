@@ -533,8 +533,9 @@ def _occlusion_saliency(model, image, scaled_features, umap_features, class_inde
 
         repeated_features = tf.repeat(scaled_features, len(batch_locations), axis=0)
         repeated_umap = tf.repeat(umap_features, len(batch_locations), axis=0)
+        masked_batch_tensor = tf.convert_to_tensor(masked_batch, dtype=tf.float32)
         batch_probabilities = model(
-            [masked_batch, repeated_features, repeated_umap], training=False
+            [masked_batch_tensor, repeated_features, repeated_umap], training=False
         )
         scores.extend(np.asarray(batch_probabilities)[:, class_index].tolist())
 

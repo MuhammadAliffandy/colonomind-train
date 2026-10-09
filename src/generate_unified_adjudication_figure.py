@@ -147,16 +147,6 @@ def _rank_figure_candidates(labels, adjudications, probabilities):
     return candidates
 
 
-def _same_grade_image_candidates(image_path):
-    image_directory = os.path.dirname(image_path)
-    extensions = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
-    return [
-        os.path.join(image_directory, filename)
-        for filename in sorted(os.listdir(image_directory))
-        if os.path.splitext(filename)[1].lower() in extensions
-    ]
-
-
 def _custom_objects():
     import tensorflow_hub as hub
 
@@ -1078,23 +1068,12 @@ def main():
     for case_name in case_order:
         sample_index = selected[case_name]
         if args.sample_list:
-            original_path = image_paths[sample_index]
-            candidate_specs = [(None, None)] + [
-                (path, None)
-                for path in _same_grade_image_candidates(original_path)
-                if os.path.abspath(path) != os.path.abspath(original_path)
-            ][:99]
+            candidate_specs = [(None, None)]
         else:
             candidate_specs = [(None, index) for index in candidate_sets[case_name][:100]]
 
         last_error = None
         for candidate_position, (candidate_path, candidate_index) in enumerate(candidate_specs):
-            if args.sample_list and candidate_position:
-                print(
-                    f"Checking same-grade alternative {candidate_position}/"
-                    f"{len(candidate_specs) - 1} for {case_name}: "
-                    f"{os.path.basename(candidate_path)}"
-                )
             row_index = sample_index if candidate_index is None else candidate_index
             if candidate_path is None:
                 candidate_image = images[row_index]
@@ -1177,6 +1156,12 @@ def main():
             )
             break
         else:
+            if args.sample_list:
+                raise ValueError(
+                    f"The client-selected image for {case_name} has no valid "
+                    f"DenseNet attribution: {image_paths[sample_index]}. "
+                    "The sample was kept unchanged; request approval before replacing it."
+                )
             raise ValueError(
                 f"No DenseNet-attributable image found for {case_name} among "
                 f"{len(candidate_specs)} same-grade/eligible candidates. "

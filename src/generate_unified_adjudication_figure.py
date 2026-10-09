@@ -430,80 +430,70 @@ def _build_cnn_gradcam(model, model_name, image, scaled_features, umap_features,
                 if layer is trained_backbone
             )
             branch_tail_index = branch_backbone_index
-        conv_layer = next(
-            layer
-            for layer in reversed(backbone.layers)
-            if _is_spatial_conv(layer)
-        )
-        backbone_probe = tf.keras.Model(
-            backbone.input, [conv_layer.output, backbone.output]
-        )
         x = grad_image
         for layer in branch.layers[1:branch_backbone_index]:
             x = layer(x, training=False)
-        with tf.GradientTape() as tape:
-            activations, x = backbone_probe(x, training=False)
-            for layer in branch.layers[branch_tail_index + (trained_backbone is not None) :]:
-                x = layer(x, training=False)
-            class_probabilities = _apply_unified_fusion_head(
-                model, x, grad_features, grad_umap
-            )
-            score = class_probabilities[:, class_index]
+        conv_layers = [
+            layer for layer in reversed(backbone.layers) if _is_spatial_conv(layer)
+        ]
+
+        def evaluate_layer(layer):
+            probe = tf.keras.Model(backbone.input, [layer.output, backbone.output])
+            with tf.GradientTape() as tape:
+                activations, backbone_output = probe(x, training=False)
+                branch_output = backbone_output
+                for tail_layer in branch.layers[
+                    branch_tail_index + (trained_backbone is not None) :
+                ]:
+                    branch_output = tail_layer(branch_output, training=False)
+                probabilities = _apply_unified_fusion_head(
+                    model, branch_output, grad_features, grad_umap
+                )
+                target_score = probabilities[:, class_index]
+            return activations, tape.gradient(target_score, activations)
     else:
-        conv_layer = next(
-            (
-                layer
-                for layer in reversed(branch.layers)
-                if _is_spatial_conv(layer)
-            ),
-            None,
-        )
-        if conv_layer is None:
+        conv_layers = [
+            layer for layer in reversed(branch.layers) if _is_spatial_conv(layer)
+        ]
+        if not conv_layers:
             raise ValueError(f"No spatial Conv2D feature map found in {branch.name}.")
-        branch_probe = tf.keras.Model(
-            branch.input, [conv_layer.output, branch.output]
-        )
-        with tf.GradientTape() as tape:
-            activations, branch_features = branch_probe(grad_image, training=False)
-            class_probabilities = _apply_unified_fusion_head(
-                model, branch_features, grad_features, grad_umap
-            )
-            score = class_probabilities[:, class_index]
+        def evaluate_layer(layer):
+            probe = tf.keras.Model(branch.input, [layer.output, branch.output])
+            with tf.GradientTape() as tape:
+                activations, branch_features = probe(grad_image, training=False)
+                probabilities = _apply_unified_fusion_head(
+                    model, branch_features, grad_features, grad_umap
+                )
+                target_score = probabilities[:, class_index]
+            return activations, tape.gradient(target_score, activations)
 
-    gradients = tape.gradient(score, activations)
-    if gradients is None:
-        return _input_gradient_or_occlusion_fallback(
-            model, model_name, grad_image, grad_features, grad_umap, class_index
-        )
-    weights = tf.reduce_mean(gradients, axis=(1, 2), keepdims=True)
     output_shape = (int(image.shape[1]), int(image.shape[2]))
-    heatmap = tf.nn.relu(tf.reduce_sum(weights * activations, axis=-1))[0]
-    normalized = _resize_and_normalize_heatmap(
-        heatmap, output_shape, sigma=2.5
-    )
-    if normalized is not None:
-        return normalized, "Grad-CAM"
-
-    # A positive-only CAM can collapse to zero when gradients are negative or weak.
-    # Preserve the same target class and spatial activations, but use gradient magnitude.
-    gradient_activation = tf.reduce_sum(
-        tf.abs(gradients) * tf.abs(activations), axis=-1
-    )[0]
-    normalized = _resize_and_normalize_heatmap(
-        gradient_activation, output_shape, sigma=2.5
-    )
-    if normalized is not None:
-        return normalized, "Gradient×activation saliency fallback"
-
-    gradient_magnitude = tf.reduce_mean(tf.abs(gradients), axis=-1)[0]
-    normalized = _resize_and_normalize_heatmap(
-        gradient_magnitude, output_shape, sigma=2.5
-    )
-    if normalized is None:
-        return _input_gradient_or_occlusion_fallback(
-            model, model_name, grad_image, grad_features, grad_umap, class_index
+    for conv_layer in conv_layers:
+        activations, gradients = evaluate_layer(conv_layer)
+        if gradients is None:
+            continue
+        weights = tf.reduce_mean(gradients, axis=(1, 2), keepdims=True)
+        heatmap = tf.nn.relu(tf.reduce_sum(weights * activations, axis=-1))[0]
+        normalized = _resize_and_normalize_heatmap(
+            heatmap, output_shape, sigma=2.5
         )
-    return normalized, "Gradient saliency fallback"
+        if normalized is not None:
+            return normalized, f"Grad-CAM ({conv_layer.name})"
+
+        # Some backbones have a flat positive CAM at the final stage. Check earlier
+        # spatial features before switching to a different attribution method.
+        gradient_activation = tf.reduce_sum(
+            tf.abs(gradients) * tf.abs(activations), axis=-1
+        )[0]
+        normalized = _resize_and_normalize_heatmap(
+            gradient_activation, output_shape, sigma=2.5
+        )
+        if normalized is not None:
+            return normalized, f"Gradient×activation ({conv_layer.name})"
+
+    return _input_gradient_or_occlusion_fallback(
+        model, model_name, grad_image, grad_features, grad_umap, class_index
+    )
 
 
 def _occlusion_saliency(model, image, scaled_features, umap_features, class_index,

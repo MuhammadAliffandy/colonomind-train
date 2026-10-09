@@ -147,6 +147,16 @@ def _rank_figure_candidates(labels, adjudications, probabilities):
     return candidates
 
 
+def _same_grade_image_candidates(image_path):
+    image_directory = os.path.dirname(image_path)
+    extensions = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
+    return [
+        os.path.join(image_directory, filename)
+        for filename in sorted(os.listdir(image_directory))
+        if os.path.splitext(filename)[1].lower() in extensions
+    ]
+
+
 def _custom_objects():
     import tensorflow_hub as hub
 
@@ -1052,71 +1062,135 @@ def main():
         selected, adjudications = select_figure_cases(labels, predictions, probabilities)
 
     dense_map_cache = {}
-    if not args.sample_list:
-        dense_name = "DenseNet-121"
-        dense_paths = _model_artifact_paths(args.models_dir, dense_name)
-        dense_model = _load_hybrid_model(dense_paths["model"])
-        dense_scaler = joblib.load(dense_paths["scaler"])
-        dense_umap_model = joblib.load(dense_paths["umap"])
-        candidate_sets = _rank_figure_candidates(labels, adjudications, probabilities)
-        dense_input_shape = dense_model.inputs[0].shape
-        dense_height, dense_width = int(dense_input_shape[1]), int(dense_input_shape[2])
-        for case_name in case_order:
-            options = candidate_sets[case_name][:100]
-            last_error = None
-            for candidate_position, sample_index in enumerate(options):
-                sample_image = tf.image.resize(
-                    images[sample_index],
-                    (dense_height, dense_width),
-                    method="bilinear",
-                )[tf.newaxis, ...]
-                scaled = dense_scaler.transform(features[sample_index : sample_index + 1])
-                embedded = dense_umap_model.transform(scaled)
-                class_index = int(
-                    predictions[MODEL_NAMES.index(dense_name), sample_index]
-                )
-                if candidate_position and not _has_spatial_input_signal(
-                    dense_model, sample_image, scaled, embedded, class_index
-                ):
-                    continue
-                try:
-                    heatmap, method = create_heatmap(
-                        dense_model,
-                        dense_name,
-                        sample_image,
-                        scaled,
-                        embedded,
-                        class_index,
-                    )
-                    display_image, bounds = _legacy_endoscopy_crop(
-                        image_paths[sample_index], images[sample_index]
-                    )
-                    aligned = _crop_heatmap_to_bounds(
-                        heatmap, bounds, display_image.shape[:2]
-                    )
-                    if _normalize_display_crop(
-                        _center_crop_zoom(aligned, args.figure_zoom)
-                    ) is None:
-                        raise ValueError(
-                            "DenseNet attribution disappears in the display crop."
-                        )
-                except ValueError as error:
-                    last_error = error
-                    continue
-                selected[case_name] = sample_index
-                dense_map_cache[case_name] = (heatmap, method)
+    sample_replacements = {}
+    dense_name = "DenseNet-121"
+    dense_paths = _model_artifact_paths(args.models_dir, dense_name)
+    dense_model = _load_hybrid_model(dense_paths["model"])
+    dense_scaler = joblib.load(dense_paths["scaler"])
+    dense_umap_model = joblib.load(dense_paths["umap"])
+    dense_input_shape = dense_model.inputs[0].shape
+    dense_height, dense_width = int(dense_input_shape[1]), int(dense_input_shape[2])
+    candidate_sets = (
+        _rank_figure_candidates(labels, adjudications, probabilities)
+        if not args.sample_list
+        else None
+    )
+    for case_name in case_order:
+        sample_index = selected[case_name]
+        if args.sample_list:
+            original_path = image_paths[sample_index]
+            candidate_specs = [(None, None)] + [
+                (path, None)
+                for path in _same_grade_image_candidates(original_path)
+                if os.path.abspath(path) != os.path.abspath(original_path)
+            ][:99]
+        else:
+            candidate_specs = [(None, index) for index in candidate_sets[case_name][:100]]
+
+        last_error = None
+        for candidate_position, (candidate_path, candidate_index) in enumerate(candidate_specs):
+            if args.sample_list and candidate_position:
                 print(
-                    f"Selected DenseNet-attributable {case_name} case "
-                    f"{sample_index + 1} (MES{labels[sample_index]})."
+                    f"Checking same-grade alternative {candidate_position}/"
+                    f"{len(candidate_specs) - 1} for {case_name}: "
+                    f"{os.path.basename(candidate_path)}"
                 )
-                break
+            row_index = sample_index if candidate_index is None else candidate_index
+            if candidate_path is None:
+                candidate_image = images[row_index]
+                candidate_features = features[row_index : row_index + 1]
+                candidate_label = int(labels[row_index])
+                candidate_source = image_paths[row_index]
             else:
-                raise ValueError(
-                    f"No DenseNet-attributable sample found for {case_name} among "
-                    f"the top {len(options)} eligible cases. Last error: {last_error}"
+                candidate_class = os.path.basename(os.path.dirname(original_path))
+                processed = process_single_image(candidate_path, candidate_class)
+                if processed is None:
+                    continue
+                candidate_image, feature, label, candidate_source = processed
+                candidate_features = np.asarray(feature, dtype=np.float32)[np.newaxis, ...]
+                candidate_label = CLASS_NAMES.index(label)
+
+            sample_image = tf.image.resize(
+                candidate_image, (dense_height, dense_width), method="bilinear"
+            )[tf.newaxis, ...]
+            scaled = dense_scaler.transform(candidate_features)
+            embedded = dense_umap_model.transform(scaled)
+            if candidate_position == 0 and candidate_index is None:
+                class_index = int(predictions[MODEL_NAMES.index(dense_name), row_index])
+            elif candidate_index is not None:
+                class_index = int(predictions[MODEL_NAMES.index(dense_name), row_index])
+            else:
+                dense_probabilities = dense_model(
+                    [sample_image, scaled, embedded], training=False
                 )
-        del dense_model, dense_scaler, dense_umap_model
-        tf.keras.backend.clear_session()
+                class_index = int(tf.argmax(dense_probabilities[0]).numpy())
+            if candidate_position and not _has_spatial_input_signal(
+                dense_model, sample_image, scaled, embedded, class_index
+            ):
+                continue
+
+            try:
+                heatmap, method = create_heatmap(
+                    dense_model, dense_name, sample_image, scaled, embedded, class_index
+                )
+                display_image, bounds = _legacy_endoscopy_crop(
+                    candidate_source, candidate_image
+                )
+                aligned = _crop_heatmap_to_bounds(
+                    heatmap, bounds, display_image.shape[:2]
+                )
+                if _normalize_display_crop(
+                    _center_crop_zoom(aligned, args.figure_zoom)
+                ) is None:
+                    raise ValueError(
+                        "DenseNet attribution disappears in the display crop."
+                    )
+            except ValueError as error:
+                last_error = error
+                continue
+
+            if candidate_path is not None:
+                images[sample_index] = candidate_image
+                features[sample_index] = candidate_features[0]
+                labels[sample_index] = candidate_label
+                image_paths[sample_index] = candidate_source
+                sample_replacements[case_name] = {
+                    "requested": original_path,
+                    "selected": candidate_source,
+                    "reference": CLASS_NAMES[candidate_label],
+                }
+                print(
+                    f"Replaced {case_name} with a same-grade image that supports "
+                    f"DenseNet attribution: {candidate_source}"
+                )
+            else:
+                selected[case_name] = row_index
+            dense_map_cache[case_name] = (heatmap, method, class_index)
+            print(
+                f"Selected DenseNet-attributable {case_name} case "
+                f"{sample_index + 1} (MES{labels[sample_index]})."
+            )
+            break
+        else:
+            raise ValueError(
+                f"No DenseNet-attributable image found for {case_name} among "
+                f"{len(candidate_specs)} same-grade/eligible candidates. "
+                f"Last error: {last_error}"
+            )
+
+    if args.sample_list and sample_replacements:
+        predictions, probabilities = predict_models(
+            args.models_dir, images, features, args.batch_size
+        )
+        adjudications = [
+            adjudicate(
+                [model_predictions[index] for model_predictions in predictions],
+                [model_probabilities[index] for model_probabilities in probabilities],
+            )
+            for index in range(len(labels))
+        ]
+    del dense_model, dense_scaler, dense_umap_model
+    tf.keras.backend.clear_session()
 
     heatmaps = {name: {} for name in MODEL_NAMES}
     map_methods = {name: {} for name in MODEL_NAMES}
@@ -1143,8 +1217,13 @@ def main():
             sample_image = tf.image.resize(
                 images[sample_index], (image_height, image_width), method="bilinear"
             )[tf.newaxis, ...]
-            if model_name == "DenseNet-121" and case_name in dense_map_cache:
-                heatmap, method = dense_map_cache[case_name]
+            if (
+                model_name == "DenseNet-121"
+                and case_name in dense_map_cache
+                and dense_map_cache[case_name][2]
+                == int(predictions[model_index, sample_index])
+            ):
+                heatmap, method, _ = dense_map_cache[case_name]
             else:
                 heatmap, method = create_heatmap(
                     model,
@@ -1208,9 +1287,11 @@ def main():
             "figure and aligned heatmaps only; inference inputs are unchanged. "
             "Each cropped heatmap is contrast-normalized within the displayed colon region."
         ),
+        "same_grade_sample_replacements": sample_replacements,
         "selected_cases": {
             case_name: {
                 "dataset_index": int(index),
+                "image_path": image_paths[index],
                 "reference": CLASS_NAMES[int(labels[index])],
                 "model_predictions": {
                     model_name: CLASS_NAMES[int(predictions[model_index, index])]

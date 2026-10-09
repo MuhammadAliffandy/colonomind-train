@@ -80,6 +80,15 @@ These are illustrative model outputs, not clinical advice. All five model
 weights plus their `base_scaler.pkl` and `umap_model.pkl` files must exist under
 the Unified experiment folders.
 
+To export a review list before making any heatmaps, run
+`src/export_unified_test_candidates.py`. It recreates the Unified image-level
+stratified 20% split (`random_state=42`), predicts with the five saved models,
+and exports up to 10 qualifying examples per requested voting category. The
+output includes a CSV, copied original images, an HTML preview, and a summary;
+it does not generate heatmaps. Candidate selection cycles through MES0 and
+MES2 first and balances cohorts where possible. This split is image-level, not
+patient-level, and must match the data ordering/caches used during training.
+
 ### 3. How to Train a Model
 You no longer need to copy/paste Jupyter Notebooks for new experiments! Use the unified `train.py` script. It automatically handles SMOTE balancing, UMAP projections, CNN training, and artifact saving.
 

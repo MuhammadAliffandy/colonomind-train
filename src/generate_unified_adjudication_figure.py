@@ -169,9 +169,10 @@ def predict_models(models_dir, images, features, batch_size):
 
         for start in range(0, len(images), batch_size):
             end = min(start + batch_size, len(images))
+            batch_images = np.asarray(images[start:end], dtype=np.float32)
             batch_probabilities = model(
                 [
-                    images[start:end],
+                    batch_images,
                     scaled_features[start:end],
                     umap_features[start:end],
                 ],

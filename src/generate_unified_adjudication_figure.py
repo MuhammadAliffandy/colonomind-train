@@ -199,7 +199,12 @@ def _resize_and_normalize_heatmap(heatmap, output_shape, sigma, power=1.0):
     heatmap = gaussian_filter(heatmap.numpy(), sigma=sigma)
     heatmap = np.nan_to_num(heatmap, nan=0.0, posinf=0.0, neginf=0.0)
     scale = float(np.percentile(heatmap, 99))
-    if scale <= 1e-10 or float(np.ptp(heatmap)) <= 1e-10:
+    magnitude = float(np.max(np.abs(heatmap)))
+    if (
+        not np.isfinite(scale)
+        or magnitude <= np.finfo(np.float64).tiny
+        or float(np.ptp(heatmap)) <= magnitude * 1e-7
+    ):
         return None
     return np.clip(heatmap / scale, 0, 1)
 
@@ -334,15 +339,19 @@ def _input_gradient_or_occlusion_fallback(
     image_tensor = tf.convert_to_tensor(image, dtype=tf.float32)
     feature_tensor = tf.convert_to_tensor(scaled_features, dtype=tf.float32)
     umap_tensor = tf.convert_to_tensor(umap_features, dtype=tf.float32)
+    logit_predictor = _logit_predictor(model)
     with tf.GradientTape() as input_tape:
         input_tape.watch(image_tensor)
-        probabilities = model(
-            [image_tensor, feature_tensor, umap_tensor], training=False
+        logits = _apply_logit_predictor(
+            logit_predictor, [image_tensor, feature_tensor, umap_tensor]
         )
-        score = tf.math.log(
-            tf.maximum(probabilities[:, class_index], tf.keras.backend.epsilon())
-        )
+        score = logits[:, class_index]
     input_gradients = input_tape.gradient(score, image_tensor)
+    gradient_spread = (
+        float(tf.math.reduce_std(input_gradients).numpy())
+        if input_gradients is not None
+        else None
+    )
     if input_gradients is not None:
         try:
             input_map, input_method = _smoothed_input_saliency(
@@ -361,6 +370,7 @@ def _input_gradient_or_occlusion_fallback(
         class_index,
         grid_size=12,
         batch_size=12,
+        logit_predictor=logit_predictor,
     )
     normalized = _resize_and_normalize_heatmap(
         occlusion_map, output_shape, sigma=2.5
@@ -368,7 +378,9 @@ def _input_gradient_or_occlusion_fallback(
     if normalized is None:
         raise ValueError(
             f"{model_name} produced no spatially varying Grad-CAM, gradient, "
-            "or occlusion map."
+            f"or occlusion map (input-gradient std={gradient_spread}, "
+            f"occlusion range={float(np.min(occlusion_map)):.6g}.."
+            f"{float(np.max(occlusion_map)):.6g})."
         )
     return normalized, "Occlusion sensitivity fallback"
 
@@ -499,13 +511,15 @@ def _build_cnn_gradcam(model, model_name, image, scaled_features, umap_features,
 
 
 def _occlusion_saliency(model, image, scaled_features, umap_features, class_index,
-                        grid_size=12, batch_size=12):
+                        grid_size=12, batch_size=12, logit_predictor=None):
     """Estimate target-class sensitivity by replacing local image patches."""
     image_array = np.asarray(image, dtype=np.float32)[0]
     height, width = image_array.shape[:2]
     patch_height = max(1, height // grid_size)
     patch_width = max(1, width // grid_size)
     baseline = np.mean(image_array, axis=(0, 1), keepdims=True)
+    if logit_predictor is None:
+        logit_predictor = _logit_predictor(model)
     locations = [
         (row, column)
         for row in range(grid_size)
@@ -526,21 +540,41 @@ def _occlusion_saliency(model, image, scaled_features, umap_features, class_inde
         repeated_features = tf.repeat(scaled_features, len(batch_locations), axis=0)
         repeated_umap = tf.repeat(umap_features, len(batch_locations), axis=0)
         masked_batch_tensor = tf.convert_to_tensor(masked_batch, dtype=tf.float32)
-        batch_probabilities = model(
-            [masked_batch_tensor, repeated_features, repeated_umap], training=False
+        batch_logits = _apply_logit_predictor(
+            logit_predictor,
+            [masked_batch_tensor, repeated_features, repeated_umap],
         )
-        target_scores = tf.math.log(
-            tf.maximum(
-                batch_probabilities[:, class_index], tf.keras.backend.epsilon()
-            )
-        )
-        scores.extend(np.asarray(target_scores).tolist())
+        scores.extend(np.asarray(batch_logits)[:, class_index].tolist())
 
-    original_score = float(
-        model([image, scaled_features, umap_features], training=False)[0, class_index]
+    original_logits = _apply_logit_predictor(
+        logit_predictor, [image, scaled_features, umap_features]
     )
+    original_score = float(original_logits[0, class_index])
     sensitivity = np.abs(original_score - np.asarray(scores, dtype=np.float32))
     return sensitivity.reshape(grid_size, grid_size)
+
+
+def _logit_predictor(model):
+    output_layer = next(
+        layer
+        for layer in reversed(model.layers)
+        if isinstance(layer, tf.keras.layers.Dense)
+    )
+    feature_model = tf.keras.Model(model.inputs, output_layer.input)
+    return feature_model, output_layer
+
+
+def _apply_logit_predictor(predictor, inputs):
+    feature_model, output_layer = predictor
+    fused = feature_model(inputs, training=False)
+    return _dense_logits(fused, output_layer)
+
+
+def _dense_logits(fused, output_layer):
+    logits = tf.linalg.matmul(fused, output_layer.kernel)
+    if output_layer.use_bias:
+        logits = tf.nn.bias_add(logits, output_layer.bias)
+    return logits
 
 
 def _apply_unified_fusion_head(
@@ -568,10 +602,7 @@ def _apply_unified_fusion_head(
     fused = dropout_layers[3](dense_layers[3](fused), training=False)
     output_layer = dense_layers[4]
     if return_logits:
-        logits = tf.linalg.matmul(fused, output_layer.kernel)
-        if output_layer.use_bias:
-            logits = tf.nn.bias_add(logits, output_layer.bias)
-        return logits
+        return _dense_logits(fused, output_layer)
     return output_layer(fused)
 
 

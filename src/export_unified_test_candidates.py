@@ -155,6 +155,93 @@ def choose_candidates(candidates, limit):
     return selected
 
 
+def choose_all_categories(candidates_by_category, limit):
+    """Prioritize all model-grade votes globally, then fill balanced category lists."""
+    selected = {category: [] for category in CATEGORY_ORDER}
+    selected_ids = {category: set() for category in CATEGORY_ORDER}
+    selected_cohorts = Counter()
+    covered_votes = set()
+
+    def coverage_gain(candidate):
+        return sum(
+            (model_index, int(vote)) not in covered_votes
+            for model_index, vote in enumerate(candidate["votes"])
+        )
+
+    def take(category, candidate):
+        selected[category].append(candidate)
+        selected_ids[category].add(candidate["source_index"])
+        selected_cohorts[candidate["cohort"]] += 1
+        covered_votes.update(
+            (model_index, int(vote))
+            for model_index, vote in enumerate(candidate["votes"])
+        )
+
+    def best_candidate(category):
+        remaining = [
+            item for item in candidates_by_category[category]
+            if item["source_index"] not in selected_ids[category]
+        ]
+        if not remaining:
+            return None
+        grade_priority = {grade: index for index, grade in enumerate(GRADE_PRIORITY)}
+        return min(
+            remaining,
+            key=lambda item: (
+                -coverage_gain(item),
+                grade_priority[item["reference_mes"]],
+                selected_cohorts[item["cohort"]],
+                -item["selection_score"],
+                item["original_path"],
+            ),
+        )
+
+    # First ensure each category gets five examples when at least five exist.
+    for _ in range(5):
+        for category in CATEGORY_ORDER:
+            if len(selected[category]) >= min(5, len(candidates_by_category[category])):
+                continue
+            candidate = best_candidate(category)
+            if candidate is not None:
+                take(category, candidate)
+
+    # Spend remaining slots on unseen model vote classes across the whole candidate list.
+    while True:
+        options = []
+        for category in CATEGORY_ORDER:
+            if len(selected[category]) >= min(limit, len(candidates_by_category[category])):
+                continue
+            candidate = best_candidate(category)
+            if candidate is not None and coverage_gain(candidate) > 0:
+                options.append((category, candidate))
+        if not options:
+            break
+        category, candidate = min(
+            options,
+            key=lambda item: (
+                -coverage_gain(item[1]),
+                len(selected[item[0]]) / max(1, min(limit, len(candidates_by_category[item[0]]))),
+                GRADE_PRIORITY.index(item[1]["reference_mes"]),
+                selected_cohorts[item[1]["cohort"]],
+                -item[1]["selection_score"],
+                item[1]["original_path"],
+            ),
+        )
+        take(category, candidate)
+
+    # Fill remaining category slots with the grade- and cohort-balanced ranking.
+    for category in CATEGORY_ORDER:
+        remaining = [
+            item for item in candidates_by_category[category]
+            if item["source_index"] not in selected_ids[category]
+        ]
+        remaining_slots = min(limit, len(candidates_by_category[category])) - len(selected[category])
+        for candidate in choose_candidates(remaining, max(0, remaining_slots)):
+            take(category, candidate)
+
+    return selected, covered_votes
+
+
 def _write_gallery(output_dir, rows):
     cards = []
     for row in rows:
@@ -216,8 +303,9 @@ def export_candidates(base_dir, output_dir, labels, paths, predictions, probabil
         "test_image_count": int(len(labels)),
         "per_category": {},
         "selection_policy": (
-            f"At most {limit} per category; grade round-robin prioritizes MES0, MES2, "
-            "MES1, MES3; cohort representation is balanced within each grade. "
+            f"At most {limit} per category; first maximize backbone vote coverage for MES0-MES3 "
+            "across the full list, then prioritize MES0, MES2, MES1, MES3 reference grades "
+            "and balance cohort representation. "
             "Candidates are ranked by mean model probability of the reference class "
             "(ensemble errors by wrong-class minus reference-class probability)."
         ),
@@ -227,8 +315,32 @@ def export_candidates(base_dir, output_dir, labels, paths, predictions, probabil
         ),
     }
 
+    selected_by_category, covered_votes = choose_all_categories(candidates_by_category, limit)
+    coverage_by_model = {
+        model_name: [
+            CLASS_NAMES[class_index]
+            for class_index in range(len(CLASS_NAMES))
+            if (model_index, class_index) in covered_votes
+        ]
+        for model_index, model_name in enumerate(MODEL_NAMES)
+    }
+    missing_vote_coverage = {
+        model_name: [grade for grade in CLASS_NAMES if grade not in grades]
+        for model_name, grades in coverage_by_model.items()
+        if len(grades) < len(CLASS_NAMES)
+    }
+    summary["model_vote_grade_coverage"] = coverage_by_model
+    summary["all_models_cover_mes0_to_mes3"] = not missing_vote_coverage
+    summary["missing_model_vote_grades"] = missing_vote_coverage
+    if missing_vote_coverage:
+        print(
+            "WARNING: Could not cover all MES0-MES3 votes for every model with the "
+            "eligible candidates and category limits: "
+            + json.dumps(missing_vote_coverage, sort_keys=True)
+        )
+
     for category in CATEGORY_ORDER:
-        chosen = choose_candidates(candidates_by_category[category], limit)
+        chosen = selected_by_category[category]
         summary["per_category"][category] = {
             "available": len(candidates_by_category[category]),
             "exported": len(chosen),

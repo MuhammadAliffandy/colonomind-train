@@ -85,8 +85,10 @@ To export a review list before making any heatmaps, run
 stratified 20% split (`random_state=42`), predicts with the five saved models,
 and exports up to 10 qualifying examples per requested voting category. The
 output includes a CSV, copied original images, an HTML preview, and a summary;
-it does not generate heatmaps. Candidate selection cycles through MES0 and
-MES2 first and balances cohorts where possible. This split is image-level, not
+it does not generate heatmaps. Candidate selection first tries to cover MES0,
+MES1, MES2, and MES3 votes for every backbone across the full exported list,
+then prioritizes MES0/MES2 references and cohort balance. `Summary.json` reports
+any vote grades that could not be covered. This split is image-level, not
 patient-level, and must match the data ordering/caches used during training.
 
 ### 3. How to Train a Model

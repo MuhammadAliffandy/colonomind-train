@@ -190,21 +190,45 @@ def predict_models(models_dir, images, features, batch_size):
     return np.asarray(predictions), np.asarray(probabilities)
 
 
+def _resize_and_normalize_heatmap(heatmap, output_shape, sigma, power=1.0):
+    heatmap = tf.convert_to_tensor(heatmap, dtype=tf.float32)
+    heatmap = tf.image.resize(
+        heatmap[tf.newaxis, ..., tf.newaxis], output_shape, method="bilinear"
+    )[0, ..., 0]
+    heatmap = tf.pow(tf.maximum(heatmap, 0.0), power)
+    heatmap = gaussian_filter(heatmap.numpy(), sigma=sigma)
+    heatmap = np.nan_to_num(heatmap, nan=0.0, posinf=0.0, neginf=0.0)
+    scale = float(np.percentile(heatmap, 99))
+    if scale <= 1e-10 or float(np.ptp(heatmap)) <= 1e-10:
+        return None
+    return np.clip(heatmap / scale, 0, 1)
+
+
 def _smoothed_input_saliency(gradients, image):
     heatmap = tf.reduce_mean(tf.abs(gradients), axis=-1)[0]
     height, width = int(image.shape[1]), int(image.shape[2])
+    coarse_shape = (max(24, height // 8), max(24, width // 8))
     heatmap = tf.image.resize(
-        heatmap[tf.newaxis, ..., tf.newaxis],
-        (max(24, height // 8), max(24, width // 8)),
-        method="bilinear",
+        heatmap[tf.newaxis, ..., tf.newaxis], coarse_shape, method="bilinear"
     )[0, ..., 0]
     heatmap = tf.image.resize(
         heatmap[tf.newaxis, ..., tf.newaxis], (height, width), method="bilinear"
     )[0, ..., 0]
-    heatmap = tf.pow(heatmap, 0.7)
-    heatmap = gaussian_filter(heatmap.numpy(), sigma=5.0)
-    scale = np.percentile(heatmap, 99)
-    return np.clip(heatmap / max(scale, 1e-8), 0, 1)
+    normalized = _resize_and_normalize_heatmap(
+        heatmap, (height, width), sigma=5.0, power=0.7
+    )
+    if normalized is not None:
+        return normalized, "Smoothed input-gradient saliency"
+
+    gradient_times_input = tf.reduce_mean(
+        tf.abs(gradients * tf.cast(image, gradients.dtype)), axis=-1
+    )[0]
+    normalized = _resize_and_normalize_heatmap(
+        gradient_times_input, (height, width), sigma=5.0, power=0.7
+    )
+    if normalized is None:
+        raise ValueError("ViT produced no spatially varying input-gradient saliency map.")
+    return normalized, "Gradient×input saliency fallback"
 
 
 def _nested_models(parent):
@@ -409,17 +433,34 @@ def _build_cnn_gradcam(model, model_name, image, scaled_features, umap_features,
             f"Grad-CAM gradient is disconnected for the {branch.name} feature map."
         )
     weights = tf.reduce_mean(gradients, axis=(1, 2), keepdims=True)
+    output_shape = (int(image.shape[1]), int(image.shape[2]))
     heatmap = tf.nn.relu(tf.reduce_sum(weights * activations, axis=-1))[0]
-    heatmap = tf.image.resize(
-        heatmap[tf.newaxis, ..., tf.newaxis],
-        (int(image.shape[1]), int(image.shape[2])),
-        method="bilinear",
-    )[0, ..., 0]
-    maximum = tf.reduce_max(heatmap)
-    heatmap = tf.math.divide_no_nan(heatmap, maximum)
-    heatmap = gaussian_filter(heatmap.numpy(), sigma=2.5)
-    scale = np.percentile(heatmap, 99)
-    return np.clip(heatmap / max(scale, 1e-8), 0, 1), "Grad-CAM"
+    normalized = _resize_and_normalize_heatmap(
+        heatmap, output_shape, sigma=2.5
+    )
+    if normalized is not None:
+        return normalized, "Grad-CAM"
+
+    # A positive-only CAM can collapse to zero when gradients are negative or weak.
+    # Preserve the same target class and spatial activations, but use gradient magnitude.
+    gradient_activation = tf.reduce_sum(
+        tf.abs(gradients) * tf.abs(activations), axis=-1
+    )[0]
+    normalized = _resize_and_normalize_heatmap(
+        gradient_activation, output_shape, sigma=2.5
+    )
+    if normalized is not None:
+        return normalized, "Gradient×activation saliency fallback"
+
+    gradient_magnitude = tf.reduce_mean(tf.abs(gradients), axis=-1)[0]
+    normalized = _resize_and_normalize_heatmap(
+        gradient_magnitude, output_shape, sigma=2.5
+    )
+    if normalized is None:
+        raise ValueError(
+            f"{model_name} produced no spatially varying Grad-CAM or saliency map."
+        )
+    return normalized, "Gradient saliency fallback"
 
 
 def _apply_unified_fusion_head(model, image_features, scaled_features, umap_features):
@@ -463,7 +504,7 @@ def _input_gradient_saliency(model, image, scaled_features, umap_features, class
     gradients = tape.gradient(score, image_tensor)
     if gradients is None:
         raise ValueError("Input gradients are unavailable for the ViT model.")
-    return _smoothed_input_saliency(gradients, image), "Smoothed input-gradient saliency"
+    return _smoothed_input_saliency(gradients, image)
 
 
 def create_heatmap(model, model_name, image, scaled_features, umap_features, class_index):
@@ -530,6 +571,17 @@ def _crop_heatmap_to_bounds(heatmap, bounds, output_shape):
     return tf.image.resize(
         cropped[..., np.newaxis], output_shape, method="bilinear"
     ).numpy()[..., 0]
+
+
+def _normalize_display_crop(heatmap):
+    """Renormalize surviving attribution inside the display crop, not removed margins."""
+    heatmap = np.nan_to_num(np.asarray(heatmap), nan=0.0, posinf=0.0, neginf=0.0)
+    low, high = np.percentile(heatmap, (1, 99))
+    if high - low <= 1e-12:
+        low, high = float(np.min(heatmap)), float(np.max(heatmap))
+    if high - low <= 1e-12:
+        return None
+    return np.clip((heatmap - low) / (high - low), 0, 1)
 
 
 def _make_figure(
@@ -705,8 +757,9 @@ def _make_figure(
         )
 
     method_note = (
-        "CNN backbones use Grad-CAM; ViT-B/16 uses input-gradient saliency because "
-        "the saved TF-Hub model exposes pooled features. Illustrative model output only."
+        "CNN backbones use Grad-CAM; degenerate maps use gradient saliency fallbacks. "
+        "ViT-B/16 uses input-gradient saliency because the saved TF-Hub model exposes "
+        "pooled features. Illustrative model output only."
     )
     fig.suptitle(
         "Unified Five-Backbone Ensemble Adjudication",
@@ -817,7 +870,7 @@ def main():
         selected, adjudications = select_figure_cases(labels, predictions, probabilities)
 
     heatmaps = {name: {} for name in MODEL_NAMES}
-    map_methods = {}
+    map_methods = {name: {} for name in MODEL_NAMES}
     selected_indices = [selected[name] for name in case_order]
     selected_features = features[selected_indices]
     display_images = {}
@@ -856,10 +909,16 @@ def main():
                 heatmap, crop_bounds[sample_index], display_images[sample_index].shape[:2]
             )
             display_heatmap = _center_crop_zoom(aligned_heatmap, args.figure_zoom)
+            display_heatmap = _normalize_display_crop(display_heatmap)
+            if display_heatmap is None:
+                raise ValueError(
+                    f"No spatial attribution remains inside the display crop for "
+                    f"{case_name} / {model_name}; refusing to save a blank heatmap panel."
+                )
             heatmaps[model_name][sample_index] = _overlay(
                 display_image, display_heatmap
             )
-            map_methods[model_name] = method
+            map_methods[model_name][case_name] = method
             print(f"Prepared {case_name} with {model_name}.")
         del model, scaler, umap_model, scaled_features, umap_features
         tf.keras.backend.clear_session()
@@ -893,7 +952,10 @@ def main():
         ),
         "figure_zoom": args.figure_zoom,
         "display_crop": "legacy crop [30:430, 200:550] when raw image height>450 and width>550",
-        "display_crop_applies_to": "figure and aligned heatmaps only; inference inputs are unchanged",
+        "display_crop_applies_to": (
+            "figure and aligned heatmaps only; inference inputs are unchanged. "
+            "Each cropped heatmap is contrast-normalized within the displayed colon region."
+        ),
         "selected_cases": {
             case_name: {
                 "dataset_index": int(index),
@@ -915,10 +977,11 @@ def main():
         "visualization_methods": map_methods,
         "note": (
             "Illustrative examples only; they may overlap training data and are not an "
-            "independent test set. CNN backbones use Grad-CAM; ViT-B/16 uses "
-            "input-gradient saliency."
+            "independent test set. CNN backbones use Grad-CAM with saliency fallback "
+            "for degenerate maps; ViT-B/16 uses input-gradient saliency."
             if args.sample_list
-            else "CNN backbones use Grad-CAM; ViT-B/16 uses input-gradient saliency."
+            else "CNN backbones use Grad-CAM with saliency fallback for degenerate maps; "
+            "ViT-B/16 uses input-gradient saliency."
         ),
     }
     os.makedirs(os.path.dirname(os.path.abspath(metadata_path)), exist_ok=True)

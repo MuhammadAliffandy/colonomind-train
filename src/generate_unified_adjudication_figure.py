@@ -1121,7 +1121,12 @@ def main():
                 class_index = int(predictions[MODEL_NAMES.index(dense_name), row_index])
             else:
                 dense_probabilities = dense_model(
-                    [sample_image, scaled, embedded], training=False
+                    [
+                        sample_image,
+                        tf.convert_to_tensor(scaled, dtype=tf.float32),
+                        tf.convert_to_tensor(embedded, dtype=tf.float32),
+                    ],
+                    training=False,
                 )
                 class_index = int(tf.argmax(dense_probabilities[0]).numpy())
             if candidate_position and not _has_spatial_input_signal(

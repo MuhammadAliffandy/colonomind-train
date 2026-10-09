@@ -6,10 +6,14 @@ import html
 import json
 import os
 import shutil
+import sys
 from collections import Counter, defaultdict
 
 import numpy as np
 from sklearn.model_selection import train_test_split
+
+# Running this file directly puts src/ rather than the repository root on sys.path.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.dgx_dataloader import load_all_images, load_tmc_ucm
 from src.ensemble_adjudication import CLASS_NAMES, adjudicate

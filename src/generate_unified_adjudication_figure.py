@@ -339,7 +339,9 @@ def _input_gradient_or_occlusion_fallback(
         probabilities = model(
             [image_tensor, feature_tensor, umap_tensor], training=False
         )
-        score = probabilities[:, class_index]
+        score = tf.math.log(
+            tf.maximum(probabilities[:, class_index], tf.keras.backend.epsilon())
+        )
     input_gradients = input_tape.gradient(score, image_tensor)
     if input_gradients is not None:
         try:
@@ -446,10 +448,10 @@ def _build_cnn_gradcam(model, model_name, image, scaled_features, umap_features,
                     branch_tail_index + (trained_backbone is not None) :
                 ]:
                     branch_output = tail_layer(branch_output, training=False)
-                probabilities = _apply_unified_fusion_head(
-                    model, branch_output, grad_features, grad_umap
+                logits = _apply_unified_fusion_head(
+                    model, branch_output, grad_features, grad_umap, return_logits=True
                 )
-                target_score = probabilities[:, class_index]
+                target_score = logits[:, class_index]
             return activations, tape.gradient(target_score, activations)
     else:
         conv_layers = [
@@ -461,10 +463,10 @@ def _build_cnn_gradcam(model, model_name, image, scaled_features, umap_features,
             probe = tf.keras.Model(branch.input, [layer.output, branch.output])
             with tf.GradientTape() as tape:
                 activations, branch_features = probe(grad_image, training=False)
-                probabilities = _apply_unified_fusion_head(
-                    model, branch_features, grad_features, grad_umap
+                logits = _apply_unified_fusion_head(
+                    model, branch_features, grad_features, grad_umap, return_logits=True
                 )
-                target_score = probabilities[:, class_index]
+                target_score = logits[:, class_index]
             return activations, tape.gradient(target_score, activations)
 
     output_shape = (int(image.shape[1]), int(image.shape[2]))
@@ -527,7 +529,12 @@ def _occlusion_saliency(model, image, scaled_features, umap_features, class_inde
         batch_probabilities = model(
             [masked_batch_tensor, repeated_features, repeated_umap], training=False
         )
-        scores.extend(np.asarray(batch_probabilities)[:, class_index].tolist())
+        target_scores = tf.math.log(
+            tf.maximum(
+                batch_probabilities[:, class_index], tf.keras.backend.epsilon()
+            )
+        )
+        scores.extend(np.asarray(target_scores).tolist())
 
     original_score = float(
         model([image, scaled_features, umap_features], training=False)[0, class_index]
@@ -536,7 +543,9 @@ def _occlusion_saliency(model, image, scaled_features, umap_features, class_inde
     return sensitivity.reshape(grid_size, grid_size)
 
 
-def _apply_unified_fusion_head(model, image_features, scaled_features, umap_features):
+def _apply_unified_fusion_head(
+    model, image_features, scaled_features, umap_features, return_logits=False
+):
     dense_layers = [layer for layer in model.layers if isinstance(layer, tf.keras.layers.Dense)]
     norm_layers = [layer for layer in model.layers if isinstance(layer, tf.keras.layers.BatchNormalization)]
     dropout_layers = [layer for layer in model.layers if isinstance(layer, tf.keras.layers.Dropout)]
@@ -557,7 +566,13 @@ def _apply_unified_fusion_head(model, image_features, scaled_features, umap_feat
     )
     fused = concat_layer([image_features, handcrafted, embedding])
     fused = dropout_layers[3](dense_layers[3](fused), training=False)
-    return dense_layers[4](fused)
+    output_layer = dense_layers[4]
+    if return_logits:
+        logits = tf.linalg.matmul(fused, output_layer.kernel)
+        if output_layer.use_bias:
+            logits = tf.nn.bias_add(logits, output_layer.bias)
+        return logits
+    return output_layer(fused)
 
 
 def _input_gradient_saliency(model, image, scaled_features, umap_features, class_index):

@@ -328,6 +328,49 @@ def _copy_backbone_weights_by_name(backbone, source_branch):
         )
 
 
+def _input_gradient_or_occlusion_fallback(
+    model, model_name, image, scaled_features, umap_features, class_index
+):
+    image_tensor = tf.convert_to_tensor(image, dtype=tf.float32)
+    feature_tensor = tf.convert_to_tensor(scaled_features, dtype=tf.float32)
+    umap_tensor = tf.convert_to_tensor(umap_features, dtype=tf.float32)
+    with tf.GradientTape() as input_tape:
+        input_tape.watch(image_tensor)
+        probabilities = model(
+            [image_tensor, feature_tensor, umap_tensor], training=False
+        )
+        score = probabilities[:, class_index]
+    input_gradients = input_tape.gradient(score, image_tensor)
+    if input_gradients is not None:
+        try:
+            input_map, input_method = _smoothed_input_saliency(
+                input_gradients, image_tensor
+            )
+            return input_map, f"{input_method} fallback"
+        except ValueError:
+            pass
+
+    output_shape = (int(image.shape[1]), int(image.shape[2]))
+    occlusion_map = _occlusion_saliency(
+        model,
+        image_tensor,
+        feature_tensor,
+        umap_tensor,
+        class_index,
+        grid_size=12,
+        batch_size=12,
+    )
+    normalized = _resize_and_normalize_heatmap(
+        occlusion_map, output_shape, sigma=2.5
+    )
+    if normalized is None:
+        raise ValueError(
+            f"{model_name} produced no spatially varying Grad-CAM, gradient, "
+            "or occlusion map."
+        )
+    return normalized, "Occlusion sensitivity fallback"
+
+
 def _build_cnn_gradcam(model, model_name, image, scaled_features, umap_features, class_index):
     branch = next(
         (
@@ -429,8 +472,8 @@ def _build_cnn_gradcam(model, model_name, image, scaled_features, umap_features,
 
     gradients = tape.gradient(score, activations)
     if gradients is None:
-        raise ValueError(
-            f"Grad-CAM gradient is disconnected for the {branch.name} feature map."
+        return _input_gradient_or_occlusion_fallback(
+            model, model_name, grad_image, grad_features, grad_umap, class_index
         )
     weights = tf.reduce_mean(gradients, axis=(1, 2), keepdims=True)
     output_shape = (int(image.shape[1]), int(image.shape[2]))
@@ -457,10 +500,49 @@ def _build_cnn_gradcam(model, model_name, image, scaled_features, umap_features,
         gradient_magnitude, output_shape, sigma=2.5
     )
     if normalized is None:
-        raise ValueError(
-            f"{model_name} produced no spatially varying Grad-CAM or saliency map."
+        return _input_gradient_or_occlusion_fallback(
+            model, model_name, grad_image, grad_features, grad_umap, class_index
         )
     return normalized, "Gradient saliency fallback"
+
+
+def _occlusion_saliency(model, image, scaled_features, umap_features, class_index,
+                        grid_size=12, batch_size=12):
+    """Estimate target-class sensitivity by replacing local image patches."""
+    image_array = np.asarray(image, dtype=np.float32)[0]
+    height, width = image_array.shape[:2]
+    patch_height = max(1, height // grid_size)
+    patch_width = max(1, width // grid_size)
+    baseline = np.mean(image_array, axis=(0, 1), keepdims=True)
+    locations = [
+        (row, column)
+        for row in range(grid_size)
+        for column in range(grid_size)
+    ]
+    scores = []
+
+    for start in range(0, len(locations), batch_size):
+        batch_locations = locations[start : start + batch_size]
+        masked_batch = np.repeat(image_array[np.newaxis, ...], len(batch_locations), axis=0)
+        for image_index, (row, column) in enumerate(batch_locations):
+            top = min(row * patch_height, height - 1)
+            left = min(column * patch_width, width - 1)
+            bottom = min(top + patch_height, height)
+            right = min(left + patch_width, width)
+            masked_batch[image_index, top:bottom, left:right] = baseline
+
+        repeated_features = tf.repeat(scaled_features, len(batch_locations), axis=0)
+        repeated_umap = tf.repeat(umap_features, len(batch_locations), axis=0)
+        batch_probabilities = model(
+            [masked_batch, repeated_features, repeated_umap], training=False
+        )
+        scores.extend(np.asarray(batch_probabilities)[:, class_index].tolist())
+
+    original_score = float(
+        model([image, scaled_features, umap_features], training=False)[0, class_index]
+    )
+    sensitivity = np.abs(original_score - np.asarray(scores, dtype=np.float32))
+    return sensitivity.reshape(grid_size, grid_size)
 
 
 def _apply_unified_fusion_head(model, image_features, scaled_features, umap_features):
@@ -757,7 +839,8 @@ def _make_figure(
         )
 
     method_note = (
-        "CNN backbones use Grad-CAM; degenerate maps use gradient saliency fallbacks. "
+        "CNN backbones use Grad-CAM; degenerate maps use input-gradient or occlusion "
+        "saliency fallbacks. "
         "ViT-B/16 uses input-gradient saliency because the saved TF-Hub model exposes "
         "pooled features. Illustrative model output only."
     )
@@ -977,10 +1060,11 @@ def main():
         "visualization_methods": map_methods,
         "note": (
             "Illustrative examples only; they may overlap training data and are not an "
-            "independent test set. CNN backbones use Grad-CAM with saliency fallback "
+            "independent test set. CNN backbones use Grad-CAM with input-gradient or "
+            "occlusion fallback "
             "for degenerate maps; ViT-B/16 uses input-gradient saliency."
             if args.sample_list
-            else "CNN backbones use Grad-CAM with saliency fallback for degenerate maps; "
+            else "CNN backbones use Grad-CAM with input-gradient or occlusion fallback "
             "ViT-B/16 uses input-gradient saliency."
         ),
     }

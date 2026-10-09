@@ -109,6 +109,44 @@ def load_explicit_samples(base_dir, sample_list_path):
     )
 
 
+def _rank_figure_candidates(labels, adjudications, probabilities):
+    candidates = {
+        "Unanimous": [],
+        "Majority rescue": [],
+        "Tie-break": [],
+        "Safety fallback": [],
+        "Ensemble error": [],
+    }
+    for index, result in enumerate(adjudications):
+        correct = result["label"] == int(labels[index])
+        if result["rule"] == "Unanimous consensus" and correct:
+            candidates["Unanimous"].append(index)
+        elif (
+            result["rule"] == "Majority vote"
+            and correct
+            and max(result["vote_counts"].values()) == 3
+        ):
+            candidates["Majority rescue"].append(index)
+        elif result["rule"] == "Mean-probability tie-break" and correct:
+            candidates["Tie-break"].append(index)
+        elif result["rule"] == "Safety fallback: most severe" and correct:
+            candidates["Safety fallback"].append(index)
+        if not correct:
+            candidates["Ensemble error"].append(index)
+
+    def confidence(index):
+        return sum(
+            float(np.max(model_probabilities[index]))
+            for model_probabilities in probabilities
+        )
+
+    for case_name in candidates:
+        candidates[case_name].sort(
+            key=lambda index: (confidence(index), -index), reverse=True
+        )
+    return candidates
+
+
 def _custom_objects():
     import tensorflow_hub as hub
 
@@ -564,6 +602,30 @@ def _logit_predictor(model):
     return feature_model, output_layer
 
 
+def _has_spatial_input_signal(model, image, scaled_features, umap_features, class_index):
+    image_tensor = tf.convert_to_tensor(image, dtype=tf.float32)
+    predictor = _logit_predictor(model)
+    with tf.GradientTape() as tape:
+        tape.watch(image_tensor)
+        logits = _apply_logit_predictor(
+            predictor,
+            [
+                image_tensor,
+                tf.convert_to_tensor(scaled_features, dtype=tf.float32),
+                tf.convert_to_tensor(umap_features, dtype=tf.float32),
+            ],
+        )
+        target_logit = logits[:, class_index]
+    gradients = tape.gradient(target_logit, image_tensor)
+    if gradients is None:
+        return False
+    try:
+        _smoothed_input_saliency(gradients, image_tensor)
+        return True
+    except ValueError:
+        return False
+
+
 def _apply_logit_predictor(predictor, inputs):
     feature_model, output_layer = predictor
     fused = feature_model(inputs, training=False)
@@ -989,6 +1051,73 @@ def main():
     else:
         selected, adjudications = select_figure_cases(labels, predictions, probabilities)
 
+    dense_map_cache = {}
+    if not args.sample_list:
+        dense_name = "DenseNet-121"
+        dense_paths = _model_artifact_paths(args.models_dir, dense_name)
+        dense_model = _load_hybrid_model(dense_paths["model"])
+        dense_scaler = joblib.load(dense_paths["scaler"])
+        dense_umap_model = joblib.load(dense_paths["umap"])
+        candidate_sets = _rank_figure_candidates(labels, adjudications, probabilities)
+        dense_input_shape = dense_model.inputs[0].shape
+        dense_height, dense_width = int(dense_input_shape[1]), int(dense_input_shape[2])
+        for case_name in case_order:
+            options = candidate_sets[case_name][:100]
+            last_error = None
+            for candidate_position, sample_index in enumerate(options):
+                sample_image = tf.image.resize(
+                    images[sample_index],
+                    (dense_height, dense_width),
+                    method="bilinear",
+                )[tf.newaxis, ...]
+                scaled = dense_scaler.transform(features[sample_index : sample_index + 1])
+                embedded = dense_umap_model.transform(scaled)
+                class_index = int(
+                    predictions[MODEL_NAMES.index(dense_name), sample_index]
+                )
+                if candidate_position and not _has_spatial_input_signal(
+                    dense_model, sample_image, scaled, embedded, class_index
+                ):
+                    continue
+                try:
+                    heatmap, method = create_heatmap(
+                        dense_model,
+                        dense_name,
+                        sample_image,
+                        scaled,
+                        embedded,
+                        class_index,
+                    )
+                    display_image, bounds = _legacy_endoscopy_crop(
+                        image_paths[sample_index], images[sample_index]
+                    )
+                    aligned = _crop_heatmap_to_bounds(
+                        heatmap, bounds, display_image.shape[:2]
+                    )
+                    if _normalize_display_crop(
+                        _center_crop_zoom(aligned, args.figure_zoom)
+                    ) is None:
+                        raise ValueError(
+                            "DenseNet attribution disappears in the display crop."
+                        )
+                except ValueError as error:
+                    last_error = error
+                    continue
+                selected[case_name] = sample_index
+                dense_map_cache[case_name] = (heatmap, method)
+                print(
+                    f"Selected DenseNet-attributable {case_name} case "
+                    f"{sample_index + 1} (MES{labels[sample_index]})."
+                )
+                break
+            else:
+                raise ValueError(
+                    f"No DenseNet-attributable sample found for {case_name} among "
+                    f"the top {len(options)} eligible cases. Last error: {last_error}"
+                )
+        del dense_model, dense_scaler, dense_umap_model
+        tf.keras.backend.clear_session()
+
     heatmaps = {name: {} for name in MODEL_NAMES}
     map_methods = {name: {} for name in MODEL_NAMES}
     selected_indices = [selected[name] for name in case_order]
@@ -1014,14 +1143,17 @@ def main():
             sample_image = tf.image.resize(
                 images[sample_index], (image_height, image_width), method="bilinear"
             )[tf.newaxis, ...]
-            heatmap, method = create_heatmap(
-                model,
-                model_name,
-                sample_image,
-                scaled_features[case_row : case_row + 1],
-                umap_features[case_row : case_row + 1],
-                int(predictions[model_index, sample_index]),
-            )
+            if model_name == "DenseNet-121" and case_name in dense_map_cache:
+                heatmap, method = dense_map_cache[case_name]
+            else:
+                heatmap, method = create_heatmap(
+                    model,
+                    model_name,
+                    sample_image,
+                    scaled_features[case_row : case_row + 1],
+                    umap_features[case_row : case_row + 1],
+                    int(predictions[model_index, sample_index]),
+                )
             display_image = _center_crop_zoom(
                 display_images[sample_index], args.figure_zoom
             )

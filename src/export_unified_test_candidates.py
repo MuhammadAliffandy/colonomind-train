@@ -23,12 +23,20 @@ from src.generate_unified_adjudication_figure import MODEL_NAMES, predict_models
 DEFAULT_BASE_DIR = "/home/D13K48009/raid/Clara/new_drive"
 DEFAULT_MODELS_DIR = "/home/D13K48009/raid/Clara/colonomind-train/Result/Intra_Unified"
 GRADE_PRIORITY = ("MES0", "MES2", "MES1", "MES3")
-CATEGORY_ORDER = ("majority_rescue", "tie_221", "fallback_2111", "ensemble_error")
+CATEGORY_ORDER = ("unanimous", "majority_rescue", "tie_221", "fallback_2111", "ensemble_error")
 CATEGORY_TITLES = {
-    "majority_rescue": "Majority rescue (ConvNeXt-Tiny wrong)",
+    "unanimous": "Unanimous consensus (5/5 models agree)",
+    "majority_rescue": "Majority rescue (3/5 or 4/5 models agree)",
     "tie_221": "2:2:1 tie-break",
     "fallback_2111": "2:1:1:1 safety fallback",
     "ensemble_error": "Ensemble error",
+}
+CATEGORY_GRADE_PRIORITY = {
+    "unanimous": ("MES0", "MES1", "MES2", "MES3"),
+    "majority_rescue": ("MES2", "MES1", "MES3", "MES0"),  # Prioritize MES2 for majority vote
+    "tie_221": ("MES0", "MES2", "MES1", "MES3"),
+    "fallback_2111": ("MES3", "MES2", "MES1", "MES0"),    # Prioritize MES3 for safety fallback
+    "ensemble_error": ("MES1", "MES2", "MES3", "MES0"),   # Prioritize MES1 for ensemble error
 }
 
 
@@ -97,10 +105,11 @@ def classify_candidate(reference_index, votes, probabilities, adjudication):
     pattern = sorted(counts.values(), reverse=True)
     categories = []
 
+    if adjudication["rule"] == "Unanimous consensus" and reference_correct:
+        categories.append("unanimous")
     if (
         adjudication["rule"] == "Majority vote"
         and reference_correct
-        and int(votes[3]) != int(reference_index)
         and counts[int(reference_index)] >= 3
     ):
         categories.append("majority_rescue")
@@ -120,8 +129,10 @@ def _candidate_score(category, reference_index, adjudication, probabilities):
     return float(mean_probability[reference_index])
 
 
-def choose_candidates(candidates, limit):
+def choose_candidates(candidates, limit, grade_priority=None):
     """Balance MES grades first, then cohort representation, with deterministic ranking."""
+    if grade_priority is None:
+        grade_priority = GRADE_PRIORITY
     by_grade = defaultdict(list)
     for candidate in candidates:
         by_grade[candidate["reference_mes"]].append(candidate)
@@ -133,7 +144,7 @@ def choose_candidates(candidates, limit):
     selected_by_cohort = Counter()
     while len(selected) < limit:
         made_progress = False
-        for grade in GRADE_PRIORITY:
+        for grade in grade_priority:
             remaining = [
                 item for item in by_grade[grade]
                 if item["source_index"] not in selected_indices
@@ -188,7 +199,8 @@ def choose_all_categories(candidates_by_category, limit):
         ]
         if not remaining:
             return None
-        grade_priority = {grade: index for index, grade in enumerate(GRADE_PRIORITY)}
+        priorities = CATEGORY_GRADE_PRIORITY.get(category, GRADE_PRIORITY)
+        grade_priority = {grade: index for index, grade in enumerate(priorities)}
         return min(
             remaining,
             key=lambda item: (
@@ -240,7 +252,8 @@ def choose_all_categories(candidates_by_category, limit):
             if item["source_index"] not in selected_ids[category]
         ]
         remaining_slots = min(limit, len(candidates_by_category[category])) - len(selected[category])
-        for candidate in choose_candidates(remaining, max(0, remaining_slots)):
+        cat_priority = CATEGORY_GRADE_PRIORITY.get(category, GRADE_PRIORITY)
+        for candidate in choose_candidates(remaining, max(0, remaining_slots), grade_priority=cat_priority):
             take(category, candidate)
 
     return selected, covered_votes
@@ -422,8 +435,8 @@ def main():
     args = parser.parse_args()
     if args.batch_size < 1:
         parser.error("--batch-size must be at least 1.")
-    if args.per_category < 5 or args.per_category > 10:
-        parser.error("--per-category must be between 5 and 10.")
+    if args.per_category < 3 or args.per_category > 50:
+        parser.error("--per-category must be between 3 and 50.")
 
     images, features, labels, paths = load_unified_pool(args.base_dir, args.cache_dir)
     labels = np.asarray([CLASS_NAMES.index(str(label)) for label in labels], dtype=np.int64)

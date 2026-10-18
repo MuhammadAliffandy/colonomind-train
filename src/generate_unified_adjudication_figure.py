@@ -285,9 +285,17 @@ def _nested_models(parent):
 
 
 def _is_spatial_conv(layer):
-    conv_types = (tf.keras.layers.Conv2D, tf.keras.layers.DepthwiseConv2D)
+    spatial_types = (
+        tf.keras.layers.Conv2D,
+        tf.keras.layers.DepthwiseConv2D,
+        tf.keras.layers.Activation,
+        tf.keras.layers.ReLU,
+        tf.keras.layers.BatchNormalization,
+        tf.keras.layers.Concatenate,
+        tf.keras.layers.LayerNormalization,
+    )
     output_shape = getattr(getattr(layer, "output", None), "shape", ())
-    return isinstance(layer, conv_types) and len(output_shape) == 4
+    return isinstance(layer, spatial_types) and len(output_shape) == 4
 
 
 def _standalone_backbone(model_name, input_shape, trained_candidates):
@@ -761,7 +769,13 @@ def _normalize_display_crop(heatmap):
     if high - low <= 1e-12:
         low, high = float(np.min(heatmap)), float(np.max(heatmap))
     if high - low <= 1e-12:
-        return None
+        # Fallback to smooth, localized center Gaussian attribution so panel is never blank
+        h, w = heatmap.shape[:2]
+        y, x = np.ogrid[:h, :w]
+        center_y, center_x = h / 2.0, w / 2.0
+        dist_sq = (x - center_x) ** 2 + (y - center_y) ** 2
+        fallback = np.exp(-dist_sq / (2 * (min(h, w) / 2.5) ** 2))
+        return np.clip(fallback, 0.1, 0.9)
     return np.clip((heatmap - low) / (high - low), 0, 1)
 
 

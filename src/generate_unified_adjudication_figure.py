@@ -122,15 +122,28 @@ def load_explicit_samples(base_dir, sample_list_path, default_bundle=None):
             image_path = token
             class_name = None
 
-        # 3. Resolve path if relative
-        if not os.path.isabs(image_path):
+        # 3. Resolve path if not directly found
+        if not os.path.isfile(image_path):
+            filename = os.path.basename(image_path)
+            exts = [".jpg", ".JPG", ".bmp", ".BMP", ".png", ".PNG"]
+            project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
             candidates = [
-                os.path.join(base_dir, "Dataset+Code", image_path.removeprefix("Dataset+Code/")),
-                os.path.join(base_dir, image_path),
-                os.path.join(base_dir, "Dataset", image_path.removeprefix("Dataset/")),
+                image_path.replace("/home/D13K48009/raid/", "/raid/D13K48009/"),
+                image_path.replace("/raid/D13K48009/", "/home/D13K48009/raid/"),
+                os.path.join(base_dir, "Dataset+Code", image_path.removeprefix("Dataset+Code/").lstrip("/")),
+                os.path.join(base_dir, image_path.lstrip("/")),
+                os.path.join(base_dir, "Dataset", image_path.removeprefix("Dataset/").lstrip("/")),
+                os.path.join(base_dir, "Dataset", "TMC-UCM", "images", filename),
             ]
+            # Also check exported original_images
+            for ext in exts:
+                candidates.append(os.path.join(project_dir, "Result", "Unified_Test_Candidates", "original_images", f"{token}{ext}"))
+                candidates.append(os.path.join(base_dir, "Result", "Unified_Test_Candidates", "original_images", f"{token}{ext}"))
+            candidates.append(os.path.join(project_dir, "Result", "Unified_Test_Candidates", "original_images", filename))
+
             for c in candidates:
                 if os.path.isfile(c):
+                    print(f"  -> Path auto-corrected: {image_path} -> {c}")
                     image_path = c
                     break
 

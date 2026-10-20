@@ -60,38 +60,98 @@ def load_mixed_data(base_dir, cache_dir=None):
     )
 
 
-def load_explicit_samples(base_dir, sample_list_path):
-    """Load a small, user-curated list of paths relative to Dataset+Code."""
-    dataset_root = os.path.join(base_dir, "Dataset+Code")
+def _load_candidate_catalog(base_dir):
+    """Load candidate lookup from Unified_Test_Candidates.csv if available."""
+    catalog = {}
+    csv_paths = [
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "Result", "Unified_Test_Candidates", "Unified_Test_Candidates.csv"),
+        os.path.join(base_dir, "Result", "Unified_Test_Candidates", "Unified_Test_Candidates.csv"),
+        os.path.expanduser("~/Clara/colonomind-train/Result/Unified_Test_Candidates/Unified_Test_Candidates.csv"),
+        "/home/D13K48009/raid/Clara/colonomind-train/Result/Unified_Test_Candidates/Unified_Test_Candidates.csv",
+    ]
+    for p in csv_paths:
+        if os.path.isfile(p):
+            try:
+                import csv
+                with open(p, "r", encoding="utf-8-sig") as f:
+                    for row in csv.DictReader(f):
+                        cid = row.get("candidate_id")
+                        orig = row.get("original_path")
+                        ref = row.get("reference_mes")
+                        if cid and orig:
+                            catalog[cid] = (orig, ref)
+            except Exception:
+                pass
+            break
+    return catalog
+
+
+def load_explicit_samples(base_dir, sample_list_path, default_bundle=None):
+    """Load a curated list of images by path, candidate ID, or AUTO keyword."""
     with open(sample_list_path, "r", encoding="utf-8") as sample_file:
-        relative_paths = [
+        tokens = [
             line.strip()
             for line in sample_file
             if line.strip() and not line.lstrip().startswith("#")
         ]
-    if not relative_paths:
-        raise ValueError(f"No image paths found in sample list: {sample_list_path}")
+    if not tokens:
+        raise ValueError(f"No image tokens found in sample list: {sample_list_path}")
 
+    catalog = _load_candidate_catalog(base_dir)
     images, features, labels, paths = [], [], [], []
     label_to_index = {name: index for index, name in enumerate(CLASS_NAMES)}
-    for relative_path in relative_paths:
-        relative_path = relative_path.removeprefix("Dataset+Code/")
-        if relative_path.startswith("./"):
-            relative_path = relative_path[2:]
-        if os.path.isabs(relative_path):
-            raise ValueError("Sample paths must be relative to Dataset+Code/.")
-        image_path = os.path.join(dataset_root, relative_path)
-        if os.path.commonpath((dataset_root, os.path.abspath(image_path))) != os.path.abspath(
-            dataset_root
-        ):
-            raise ValueError("Sample paths must stay inside Dataset+Code/.")
+
+    for row_idx, token in enumerate(tokens):
+        # 1. AUTO / ORIGINAL / KEEP keyword -> reuse default selection
+        if token.upper() in ("AUTO", "ORIGINAL", "DEFAULT", "KEEP") and default_bundle is not None:
+            def_images, def_features, def_labels, def_paths, def_selected = default_bundle
+            case_name = CASE_ORDER[row_idx] if row_idx < len(CASE_ORDER) else list(def_selected.keys())[row_idx]
+            def_idx = def_selected[case_name]
+            images.append(def_images[def_idx])
+            features.append(def_features[def_idx])
+            labels.append(def_labels[def_idx])
+            paths.append(def_paths[def_idx])
+            print(f"Row {row_idx + 1} ({case_name}): Keeping original/default image ({os.path.basename(def_paths[def_idx])})")
+            continue
+
+        # 2. Candidate ID lookup (e.g. tie_221__MES2__18)
+        if token in catalog:
+            image_path, class_name = catalog[token]
+            print(f"Row {row_idx + 1}: Resolved candidate ID '{token}' -> {image_path} ({class_name})")
+        else:
+            image_path = token
+            class_name = None
+
+        # 3. Resolve path if relative
+        if not os.path.isabs(image_path):
+            candidates = [
+                os.path.join(base_dir, "Dataset+Code", image_path.removeprefix("Dataset+Code/")),
+                os.path.join(base_dir, image_path),
+                os.path.join(base_dir, "Dataset", image_path.removeprefix("Dataset/")),
+            ]
+            for c in candidates:
+                if os.path.isfile(c):
+                    image_path = c
+                    break
+
         if not os.path.isfile(image_path):
-            raise FileNotFoundError(f"Selected figure image does not exist: {image_path}")
-        class_name = os.path.basename(os.path.dirname(image_path))
+            raise FileNotFoundError(f"Selected figure image does not exist: {image_path} (from token '{token}')")
+
+        # 4. Resolve class name
+        if class_name is None:
+            parent = os.path.basename(os.path.dirname(image_path))
+            if parent in label_to_index:
+                class_name = parent
+            elif parent.startswith("Mayo "):
+                class_name = parent.replace("Mayo ", "MES")
+            else:
+                for mes in CLASS_NAMES:
+                    if mes in image_path:
+                        class_name = mes
+                        break
         if class_name not in label_to_index:
-            raise ValueError(
-                f"Expected a MES0-MES3 parent folder for selected image: {image_path}"
-            )
+            raise ValueError(f"Could not determine MES class for selected image: {image_path}. Expected MES0-MES3.")
+
         processed = process_single_image(image_path, class_name)
         if processed is None:
             raise ValueError(f"Could not preprocess selected figure image: {image_path}")
@@ -1036,11 +1096,27 @@ def main():
         )
 
     if args.sample_list:
+        with open(args.sample_list, "r", encoding="utf-8") as sf:
+            raw_tokens = [line.strip().upper() for line in sf if line.strip() and not line.lstrip().startswith("#")]
+        needs_defaults = any(t in ("AUTO", "ORIGINAL", "DEFAULT", "KEEP") for t in raw_tokens)
+        default_bundle = None
+        if needs_defaults:
+            print("Loading default mixed dataset to populate AUTO/ORIGINAL rows...")
+            def_imgs, def_feats, def_lbls, def_paths = load_mixed_data(args.base_dir, args.cache_dir)
+            def_preds, def_probs = predict_models(args.models_dir, def_imgs, def_feats, args.batch_size)
+            def_selected, _ = select_figure_cases(def_lbls, def_preds, def_probs)
+            default_bundle = (def_imgs, def_feats, def_lbls, def_paths, def_selected)
+            del def_preds, def_probs
+            tf.keras.backend.clear_session()
+
         print(f"Loading explicit figure samples from {args.sample_list}...")
         images, features, labels, image_paths = load_explicit_samples(
-            args.base_dir, args.sample_list
+            args.base_dir, args.sample_list, default_bundle=default_bundle
         )
-        case_order = tuple(f"Sample {index + 1}" for index in range(len(labels)))
+        if len(labels) == len(CASE_ORDER):
+            case_order = CASE_ORDER
+        else:
+            case_order = tuple(f"Sample {index + 1}" for index in range(len(labels)))
     else:
         print("Loading labeled examples from the mixed dataset in new_drive...")
         images, features, labels, image_paths = load_mixed_data(args.base_dir, args.cache_dir)

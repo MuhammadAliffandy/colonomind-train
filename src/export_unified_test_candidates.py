@@ -115,7 +115,7 @@ def classify_candidate(reference_index, votes, probabilities, adjudication):
         categories.append("majority_rescue")
     if pattern == [2, 2, 1] and adjudication["rule"] == "Mean-probability tie-break" and reference_correct:
         categories.append("tie_221")
-    if pattern == [2, 1, 1, 1] and adjudication["rule"].startswith("Safety fallback") and reference_correct:
+    if adjudication["rule"].startswith("Safety fallback") and reference_correct:
         categories.append("fallback_2111")
     if not reference_correct:
         categories.append("ensemble_error")
@@ -432,6 +432,11 @@ def main():
     parser.add_argument("--cache-dir", default=None)
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--per-category", type=int, default=10)
+    parser.add_argument(
+        "--all-splits",
+        action="store_true",
+        help="Search the entire dataset pool instead of only the 20% test split to maximize candidate variety.",
+    )
     args = parser.parse_args()
     if args.batch_size < 1:
         parser.error("--batch-size must be at least 1.")
@@ -440,17 +445,24 @@ def main():
 
     images, features, labels, paths = load_unified_pool(args.base_dir, args.cache_dir)
     labels = np.asarray([CLASS_NAMES.index(str(label)) for label in labels], dtype=np.int64)
-    test_indices = train_test_split(
-        np.arange(len(labels)),
-        test_size=0.2,
-        random_state=42,
-        stratify=labels,
-    )[1]
-    test_images = [images[int(index)] for index in test_indices]
-    test_features = features[test_indices]
-    test_labels = labels[test_indices]
-    test_paths = [paths[int(index)] for index in test_indices]
-    print(f"Recreated Unified held-out test split: {len(test_labels)} images.")
+    if args.all_splits:
+        test_images = images
+        test_features = features
+        test_labels = labels
+        test_paths = paths
+        print(f"Searching across full Unified pool ({len(test_labels)} images) for candidates...")
+    else:
+        test_indices = train_test_split(
+            np.arange(len(labels)),
+            test_size=0.2,
+            random_state=42,
+            stratify=labels,
+        )[1]
+        test_images = [images[int(index)] for index in test_indices]
+        test_features = features[test_indices]
+        test_labels = labels[test_indices]
+        test_paths = [paths[int(index)] for index in test_indices]
+        print(f"Recreated Unified held-out test split: {len(test_labels)} images.")
 
     del images, features, labels, paths
     predictions, probabilities = predict_models(

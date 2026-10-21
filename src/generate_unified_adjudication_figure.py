@@ -1,6 +1,7 @@
 """Create a five-backbone Unified ensemble-adjudication figure on DGX."""
 
 import argparse
+import glob
 import json
 import os
 import sys
@@ -146,6 +147,13 @@ def load_explicit_samples(base_dir, sample_list_path, default_bundle=None):
                     print(f"  -> Path auto-corrected: {image_path} -> {c}")
                     image_path = c
                     break
+
+            if not os.path.isfile(image_path):
+                # Try recursive search across base_dir
+                found_matches = glob.glob(os.path.join(base_dir, "**", filename), recursive=True)
+                if found_matches:
+                    print(f"  -> Path auto-discovered via recursive search: {image_path} -> {found_matches[0]}")
+                    image_path = found_matches[0]
 
         if not os.path.isfile(image_path):
             raise FileNotFoundError(f"Selected figure image does not exist: {image_path} (from token '{token}')")
@@ -853,6 +861,115 @@ def _normalize_display_crop(heatmap):
     return np.clip((heatmap - low) / (high - low), 0, 1)
 
 
+def export_individual_panels(
+    export_dir,
+    display_images,
+    labels,
+    predictions,
+    probabilities,
+    selected,
+    adjudications,
+    heatmaps,
+    figure_zoom,
+    case_order,
+    image_paths=None,
+):
+    """Export each panel (reference original and model Grad-CAMs) as high-res images."""
+    os.makedirs(export_dir, exist_ok=True)
+    summary_cases = []
+
+    for row, case_name in enumerate(case_order, start=1):
+        sample_index = selected[case_name]
+        true_label = int(labels[sample_index])
+        result = adjudications[sample_index]
+        source_path = image_paths[sample_index] if image_paths else "unknown"
+        case_slug = case_name.lower().replace(" ", "_").replace(":", "").replace("-", "_")
+        row_dir = os.path.join(export_dir, f"{row:02d}_{case_slug}")
+        os.makedirs(row_dir, exist_ok=True)
+
+        # 1. Reference original crop
+        reference_image = _center_crop_zoom(display_images[sample_index], figure_zoom)
+        ref_norm = np.clip(reference_image / 255.0, 0, 1)
+        plt.imsave(os.path.join(row_dir, "00_reference_original.png"), ref_norm)
+
+        # 2. Grad-CAM per model (clean full-res and annotated badge)
+        models_info = {}
+        for model_index, model_name in enumerate(MODEL_NAMES):
+            clean_name = model_name.lower().replace("-", "_").replace("/", "_")
+            predicted_label = int(predictions[model_index, sample_index])
+            confidence = float(probabilities[model_index, sample_index, predicted_label])
+            matched = (predicted_label == true_label)
+            marker = "OK" if matched else "ERR"
+            title_color = "#17824b" if matched else "#c7342e"
+
+            # Raw clean heatmap overlay
+            raw_heatmap = np.clip(heatmaps[model_name][sample_index], 0, 1)
+            plt.imsave(
+                os.path.join(row_dir, f"{model_index + 1:02d}_{clean_name}_clean.png"),
+                raw_heatmap,
+            )
+
+            # High-res annotated panel with clean typography
+            fig_cell, ax_cell = plt.subplots(figsize=(4, 4), dpi=300)
+            ax_cell.imshow(raw_heatmap)
+            ax_cell.axis("off")
+            ax_cell.set_title(
+                f"{CLASS_NAMES[predicted_label]} - {confidence:.2f}",
+                fontsize=13,
+                fontweight="bold",
+                color=title_color,
+                pad=6,
+            )
+            ax_cell.text(
+                0.96,
+                0.04,
+                marker,
+                transform=ax_cell.transAxes,
+                ha="right",
+                va="bottom",
+                fontsize=12,
+                fontweight="bold",
+                color=title_color,
+                bbox={
+                    "facecolor": "white",
+                    "alpha": 0.88,
+                    "edgecolor": title_color,
+                    "pad": 3,
+                },
+            )
+            plt.tight_layout(pad=0.2)
+            fig_cell.savefig(
+                os.path.join(row_dir, f"{model_index + 1:02d}_{clean_name}_annotated.png"),
+                dpi=300,
+                bbox_inches="tight",
+            )
+            plt.close(fig_cell)
+
+            models_info[model_name] = {
+                "predicted_grade": CLASS_NAMES[predicted_label],
+                "confidence": confidence,
+                "matches_reference": matched,
+            }
+
+        case_data = {
+            "row": row,
+            "case_name": case_name,
+            "reference_grade": CLASS_NAMES[true_label],
+            "source_image": os.path.basename(source_path),
+            "source_path": source_path,
+            "ensemble_adjudication": CLASS_NAMES[result["label"]],
+            "adjudication_rule": result["rule"],
+            "models": models_info,
+        }
+        with open(os.path.join(row_dir, "metadata.json"), "w", encoding="utf-8") as f:
+            json.dump(case_data, f, indent=2)
+        summary_cases.append(case_data)
+
+    with open(os.path.join(export_dir, "Summary_All_Cases.json"), "w", encoding="utf-8") as f:
+        json.dump(summary_cases, f, indent=2)
+    print(f"Exported individual high-resolution panels to: {export_dir}")
+
+
 def _make_figure(
     output_path,
     display_images,
@@ -1083,6 +1200,11 @@ def main():
         "--sample-list",
         default=None,
         help="Optional server-local text file of image paths relative to Dataset+Code/.",
+    )
+    parser.add_argument(
+        "--export-panels-dir",
+        default=None,
+        help="Optional directory to export high-resolution individual panels (original image + clean/annotated gradcams).",
     )
     parser.add_argument(
         "--figure-zoom",
@@ -1360,6 +1482,21 @@ def main():
             print(f"Prepared {case_name} with {model_name}.")
         del model, scaler, umap_model, scaled_features, umap_features
         tf.keras.backend.clear_session()
+
+    if args.export_panels_dir:
+        export_individual_panels(
+            args.export_panels_dir,
+            display_images,
+            labels,
+            predictions,
+            probabilities,
+            selected,
+            adjudications,
+            heatmaps,
+            args.figure_zoom,
+            case_order,
+            image_paths=image_paths,
+        )
 
     _make_figure(
         args.output,

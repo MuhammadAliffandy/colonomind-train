@@ -64,10 +64,17 @@ def load_mixed_data(base_dir, cache_dir=None):
 def _load_candidate_catalog(base_dir):
     """Load candidate lookup from Unified_Test_Candidates.csv if available."""
     catalog = {}
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     csv_paths = [
-        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "Result", "Unified_Test_Candidates", "Unified_Test_Candidates.csv"),
+        os.path.join(project_root, "Result", "Unified_Test_Candidates_Expanded", "Unified_Test_Candidates.csv"),
+        os.path.join(project_root, "Result", "Unified_Test_Candidates", "Unified_Test_Candidates.csv"),
+        os.path.join(project_root, "Result", "Safety_Fallback_Pool", "Safety_Fallback_Candidates.csv"),
+        os.path.join(base_dir, "Result", "Unified_Test_Candidates_Expanded", "Unified_Test_Candidates.csv"),
         os.path.join(base_dir, "Result", "Unified_Test_Candidates", "Unified_Test_Candidates.csv"),
-        os.path.expanduser("~/Clara/colonomind-train/Result/Unified_Test_Candidates/Unified_Test_Candidates.csv"),
+        "/raid/D13K48009/Clara/colonomind-train/Result/Unified_Test_Candidates_Expanded/Unified_Test_Candidates.csv",
+        "/raid/D13K48009/Clara/colonomind-train/Result/Unified_Test_Candidates/Unified_Test_Candidates.csv",
+        "/raid/D13K48009/Clara/colonomind-train/Result/Safety_Fallback_Pool/Safety_Fallback_Candidates.csv",
+        "/home/D13K48009/raid/Clara/colonomind-train/Result/Unified_Test_Candidates_Expanded/Unified_Test_Candidates.csv",
         "/home/D13K48009/raid/Clara/colonomind-train/Result/Unified_Test_Candidates/Unified_Test_Candidates.csv",
     ]
     for p in csv_paths:

@@ -38,7 +38,17 @@ def main():
     dest_base = os.path.abspath(os.path.expanduser(args.dest))
     package_dir = os.path.join(dest_base, "ColonoMind_V8_Package")
     models_dir = os.path.join(package_dir, "models")
-    os.makedirs(models_dir, exist_ok=True)
+
+    try:
+        os.makedirs(models_dir, exist_ok=True)
+    except OSError as e:
+        print(f"\n⚠️ PERINGATAN: Gagal membuat folder di '{dest_base}': {e}")
+        print("💡 Folder network/drive mount mungkin sedang putus koneksi (stale mount) atau butuh mount ulang.")
+        print("🔄 Mengalihkan penyimpanan otomatis ke folder lokal aman: ./ColonoMind_V8_Package ...")
+        dest_base = os.path.abspath("./ColonoMind_V8_Export")
+        package_dir = os.path.join(dest_base, "ColonoMind_V8_Package")
+        models_dir = os.path.join(package_dir, "models")
+        os.makedirs(models_dir, exist_ok=True)
 
     print("=" * 75)
     print("🚀 COLONOMIND v8 — PACKAGING ARTIFACTS FOR LOCAL & WEB INTEGRATION")
@@ -50,8 +60,11 @@ def main():
         args.v8_dir,
         "../Result/ColonoMind_v8_Hierarchical",
         "./Result/ColonoMind_v8_Hierarchical",
+        "/raid/D13K48009/Clara/Result/ColonoMind_v8_Hierarchical",
+        "/raid/D13K48009/Clara/colonomind-train/Result/ColonoMind_v8_Hierarchical",
         "../Result/ColonoMind_v12_V8FinetuneFocal",
         "./Result/ColonoMind_v12_V8FinetuneFocal",
+        "/raid/D13K48009/Clara/Result/ColonoMind_v12_V8FinetuneFocal",
         "~/Clara/colono_train/Result/ColonoMind_v8_Hierarchical",
         "~/raid/Clara/colonomind-train/Result/ColonoMind_v8_Hierarchical"
     ]
@@ -60,14 +73,17 @@ def main():
     lgb_search_dirs = [
         "../Result/ColonoMind_v13_LGBMBalancer",
         "./Result/ColonoMind_v13_LGBMBalancer",
+        "/raid/D13K48009/Clara/Result/ColonoMind_v13_LGBMBalancer",
         "../Result/ColonoMind_v8_Hierarchical",
-        "./Result/ColonoMind_v8_Hierarchical"
+        "./Result/ColonoMind_v8_Hierarchical",
+        "/raid/D13K48009/Clara/Result/ColonoMind_v8_Hierarchical"
     ]
     lgb_search_dirs = [os.path.abspath(os.path.expanduser(d)) for d in lgb_search_dirs]
 
     v14_search_dirs = [
         "../Result/ColonoMind_v14_ThresholdOpt",
-        "./Result/ColonoMind_v14_ThresholdOpt"
+        "./Result/ColonoMind_v14_ThresholdOpt",
+        "/raid/D13K48009/Clara/Result/ColonoMind_v14_ThresholdOpt"
     ]
     v14_search_dirs = [os.path.abspath(os.path.expanduser(d)) for d in v14_search_dirs]
 

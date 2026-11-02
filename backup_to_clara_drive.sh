@@ -1,16 +1,16 @@
 #!/bin/bash
 # ==============================================================================
-# ColonoMind: Backup All Experimental Results & Figures to clara_drive (rclone)
+# ColonoMind: Backup All Experimental Results & Figures to xxdrive (rclone)
 # ==============================================================================
 # Usage:
-#   bash backup_to_clara_drive.sh                     # Full backup (all results + weights)
-#   bash backup_to_clara_drive.sh --exclude-h5         # Lightweight (plots, metrics, logs only)
-#   bash backup_to_clara_drive.sh --remote my_drive:   # Custom rclone remote
+#   ./backup_to_xxdrive.sh                     # Full backup (all results + weights)
+#   ./backup_to_xxdrive.sh --exclude-h5        # Fast backup (plots, figures, metrics, logs only)
+#   ./backup_to_xxdrive.sh --remote=xxdrive:   # Custom rclone remote
 # ==============================================================================
 
 set -eo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 cd "$SCRIPT_DIR"
 
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
@@ -29,15 +29,12 @@ echo "📍 Archive Path    : ${ARCHIVE_PATH}"
 echo "☁️  Rclone Target   : ${REMOTE}"
 echo "=============================================================================="
 
-# 1. Detect candidate Result directories
+# 1. Detect candidate Result directories and resolve physical symlinks
 TARGET_DIRS=()
 
-# Priority candidates
 CANDIDATES=(
     "Result"
     "../Result"
-    "/home/D13K48009/raid/Clara/colonomind-train/Result"
-    "/home/D13K48009/raid/Clara/Result"
     "/raid/D13K48009/Clara/colonomind-train/Result"
     "/raid/D13K48009/Clara/Result"
     "Manuscript_Consistent_Results"
@@ -49,18 +46,22 @@ CANDIDATES=(
 
 for d in "${CANDIDATES[@]}"; do
     if [ -d "$d" ]; then
-        # Avoid duplicate canonical paths
-        CANON_PATH=$(cd "$d" && pwd)
+        # Resolve real physical path (eliminating /home/.../raid symlink duplicates)
+        CANON_PATH=$(cd -P "$d" 2>/dev/null && pwd -P)
+        
+        # Check if already added or if it is a subfolder of an already added folder
         ALREADY_ADDED=0
         for existing in "${TARGET_DIRS[@]}"; do
-            if [ "$existing" == "$CANON_PATH" ]; then
+            if [ "$existing" == "$CANON_PATH" ] || [[ "$CANON_PATH" == "$existing"/* ]]; then
                 ALREADY_ADDED=1
                 break
             fi
         done
+        
         if [ $ALREADY_ADDED -eq 0 ]; then
             TARGET_DIRS+=("$CANON_PATH")
-            echo "  ✅ Included directory: $CANON_PATH"
+            DIR_SIZE=$(du -sh "$CANON_PATH" 2>/dev/null | cut -f1)
+            echo "  ✅ Included directory: $CANON_PATH [$DIR_SIZE]"
         fi
     fi
 done
@@ -73,7 +74,8 @@ fi
 # 2. Check for parallel compressor (pigz)
 COMPRESS_FLAG="-czf"
 if command -v pigz &> /dev/null; then
-    echo "⚡ Multi-core compressor 'pigz' found. Using parallel compression."
+    CPU_CORES=$(nproc 2>/dev/null || echo 8)
+    echo "⚡ Multi-core compressor 'pigz' found! Using $CPU_CORES parallel threads."
     COMPRESS_FLAG="-I pigz -cf"
 fi
 
@@ -81,20 +83,25 @@ fi
 EXTRA_TAR_FLAGS=()
 for arg in "$@"; do
     if [ "$arg" == "--exclude-h5" ]; then
-        echo "⚠️ Flag --exclude-h5 passed: Excluding .h5 and .keras heavy weights."
+        echo "⚠️ Flag --exclude-h5 passed: Excluding .h5 and .keras heavy weights (Fast mode)."
         EXTRA_TAR_FLAGS+=(--exclude='*.h5' --exclude='*.keras')
     elif [[ "$arg" =~ ^--remote= ]]; then
         REMOTE="${arg#*=}"
     fi
 done
 
-# 3. Create .tar.gz
+# 3. Create .tar.gz with live progress indicator
 echo ""
 echo "🗜️  Compressing all results into tar.gz..."
-tar "${EXTRA_TAR_FLAGS[@]}" $COMPRESS_FLAG "$ARCHIVE_PATH" "${TARGET_DIRS[@]}"
+echo "ℹ️  (Live progress will print every 1,000 files processed):"
+
+tar "${EXTRA_TAR_FLAGS[@]}" \
+    --checkpoint=1000 \
+    --checkpoint-action='echo="  ⏳ [Progress] %u files archived..."' \
+    $COMPRESS_FLAG "$ARCHIVE_PATH" "${TARGET_DIRS[@]}"
 
 ARCHIVE_SIZE=$(du -h "$ARCHIVE_PATH" | cut -f1)
-echo "✅ Compression completed! File size: ${ARCHIVE_SIZE}"
+echo "✅ Compression completed! Final Archive Size: ${ARCHIVE_SIZE}"
 
 # 4. Verify tar.gz integrity
 echo ""

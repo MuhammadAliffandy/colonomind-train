@@ -80,8 +80,8 @@ def main():
                         help="Specific directories to include in archive (default: auto-detected Result folders)")
     parser.add_argument("--output-dir", default="./backups",
                         help="Directory where local .tar.gz will be created before transfer (default: ./backups)")
-    parser.add_argument("--rclone-remote", default="clara_drive:ColonoMind_Backups",
-                        help="Rclone remote destination (default: clara_drive:ColonoMind_Backups)")
+    parser.add_argument("--rclone-remote", default="xxdrive:ColonoMind_Backups",
+                        help="Rclone remote destination (default: xxdrive:ColonoMind_Backups)")
     parser.add_argument("--name-tag", default="colonomind_all_results_backup",
                         help="Prefix name for the tar.gz file")
     parser.add_argument("--exclude-h5", action="store_true",

@@ -15,7 +15,7 @@ cd "$SCRIPT_DIR"
 
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 BACKUP_DIR="${BACKUP_DIR:-./backups}"
-REMOTE="${REMOTE:-clara_drive:ColonoMind_Backups}"
+REMOTE="${REMOTE:-xxdrive:ColonoMind_Backups}"
 ARCHIVE_NAME="colonomind_all_results_${TIMESTAMP}.tar.gz"
 ARCHIVE_PATH="${BACKUP_DIR}/${ARCHIVE_NAME}"
 

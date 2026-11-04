@@ -109,3 +109,16 @@ result = predict_from_image(image_path)
 | **Local Development** | Web Deployment Repo | `colonomind-rework/` |
 | **Google Cloud (GCP)** | Cloud Storage Bucket | `gs://colonoscan-models/` |
 | **Google Cloud (GCP)** | Cloud Run Service | `colonomind` (Region: `asia-southeast1`) |
+
+---
+
+## 6. ColonoMind V15 — Autoencoder-Pretrained & Cohort-Balanced Pipeline
+
+* **Pipeline Script**: `src/train_colonomind_v15_autoencoder_balanced.py`
+* **Execution Script**: `run_colonomind_v15_pipeline.sh`
+* **Key Innovations**:
+  1. **Self-Supervised Convolutional Autoencoder (CAE)**: Pre-trained from scratch on all endoscopic imagery without labels (100% compliant with the strict no-ImageNet rule). Smoothly transfers backbone representations to Stage 1 and Stage 2 without representation bottleneck.
+  2. **Cohort & Domain Balancing**: Resamples and augments NTUH images to give equal training presence alongside LIMUC and TMC-UCM, eliminating multi-center camera/color bias.
+  3. **Spatial Upsampling (384x384)**: Preserves microvascular textures and subtle mucosal friability essential for MES1 vs MES2 distinction.
+  4. **Dual Reporting**: Concurrently records 4-Class Exact Match Accuracy and Clinical 1-Grade Off Accuracy (Top-2) across all splits and individual cohorts.
+

@@ -170,11 +170,10 @@ class CohortBalancedGenerator(Sequence):
         
         self.unique_cohorts = list(self.cohort_indices.keys())
         self.samples_per_cohort = self.batch_size // max(1, len(self.unique_cohorts))
-        self.num_batches = max(1, len(self.labels) // self.batch_size)
         self.on_epoch_end()
 
     def __len__(self):
-        return self.num_batches
+        return max(1, len(self.labels) // self.batch_size)
 
     def __getitem__(self, idx):
         batch_indices = []
@@ -428,6 +427,7 @@ def main():
     parser.add_argument("--epochs_stg1", type=int, default=30, help="Epochs for Stage 1 (Detector)")
     parser.add_argument("--epochs_stg2", type=int, default=35, help="Epochs for Stage 2 (Grader)")
     parser.add_argument("--skip_ae", action="store_true", help="Skip Autoencoder training if weights already exist")
+    parser.add_argument("--force_retrain_ae", action="store_true", help="Force retrain Autoencoder even if checkpoint exists")
     args = parser.parse_args()
 
     os.makedirs(args.save_dir, exist_ok=True)
@@ -500,9 +500,10 @@ def main():
     ae_model_path = os.path.join(args.save_dir, "modse_autoencoder.h5")
     autoencoder, encoder_backbone = build_autoencoder(target_shape)
 
-    if os.path.exists(ae_model_path) and args.skip_ae:
-        print(f"⚡ Autoencoder checkpoint found at {ae_model_path}. Loading weights...")
+    if os.path.exists(ae_model_path) and not args.force_retrain_ae:
+        print(f"⚡ Pretrained Autoencoder checkpoint found at {ae_model_path}. Loading weights...")
         autoencoder.load_weights(ae_model_path)
+        print("✅ Pretrained Autoencoder weights loaded successfully into backbone encoder!")
     else:
         print(f"🔥 Training Autoencoder on {len(X_tv_i)} images (Reconstruction loss: MSE)...")
         ae_tr_gen = AutoencoderGenerator(X_tr_i, batch_size=args.batch_size, augment=True)

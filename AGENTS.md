@@ -122,3 +122,19 @@ result = predict_from_image(image_path)
   3. **Spatial Upsampling (384x384)**: Preserves microvascular textures and subtle mucosal friability essential for MES1 vs MES2 distinction.
   4. **Dual Reporting**: Concurrently records 4-Class Exact Match Accuracy and Clinical 1-Grade Off Accuracy (Top-2) across all splits and individual cohorts.
 
+---
+
+## 7. ColonoMind V16 Titan — 90%+ Exact Match Conquest Pipeline
+
+* **Pipeline Script**: `src/train_colonomind_v16_titan_90plus.py`
+* **Execution Script**: `run_colonomind_v16_titan.sh`
+* **Target**: Exact Match Accuracy >90.0% + Clinical 1-Grade Off >95.0%.
+* **Core Arsenal**:
+  1. **Multi-Scale Mod-SE Feature Pyramid (896-dim)**: Pools representations from Block 3 (fine vascularity), Block 4 (mucosal friability), and Block 5 (semantic ulcerations).
+  2. **100 Epochs Deep Training**: Uses Warmup + Cosine Annealing learning rate schedule ($2\times 10^{-4} \to 10^{-6}$).
+  3. **5-Seed Deep Ensemble**: Diversified random seeds `[42, 100, 123, 777, 999]` to suppress boundary variance.
+  4. **Test-Time Augmentation (TTA x 8)**: Evaluates across 8 geometric and contrast variants per test frame.
+  5. **Multimodal Stacking Super Agent**: LightGBM + ExtraTrees tuned via 100 Optuna trials on 992-dim fusion vectors.
+  6. **Differential Evolution Threshold Multipliers**: Mathematical post-processing calibration on validation set to directly maximize Exact Match Accuracy.
+
+

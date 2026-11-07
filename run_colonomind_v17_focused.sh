@@ -45,3 +45,4 @@ echo "   tail -f $LOG_FILE"
 echo ""
 echo "🛑 How to stop if needed:"
 echo "   kill -9 $PID"
+

@@ -117,8 +117,46 @@ def extract_features_28(img):
     return feats
 
 # ==============================================================================
-# AUGMENTATION & GENERATOR
+# AUGMENTATION, BALANCED OVERSAMPLING & GENERATOR
 # ==============================================================================
+def balanced_oversample_dataset(X_img, X_feat, y):
+    """
+    Physically balances classes in the training set (1:1:1:1) so that every batch
+    sees equal representation of all 4 Mayo grades, preventing majority-class bias.
+    """
+    counts = np.bincount(y)
+    max_count = np.max(counts)
+    print(f"\n⚖️ PHYSICAL DATA BALANCING (Equalizing to {max_count} per class)...")
+    print(f"   Original Training Distribution: {dict(enumerate(counts))}")
+
+    balanced_imgs = []
+    balanced_feats = []
+    balanced_y = []
+
+    for c in range(NUM_CLASSES):
+        idx = np.where(y == c)[0]
+        c_imgs = X_img[idx]
+        c_feats = X_feat[idx]
+        num_c = len(idx)
+
+        if num_c < max_count:
+            repeat_idx = np.random.choice(num_c, size=max_count, replace=True)
+            balanced_imgs.append(c_imgs[repeat_idx])
+            balanced_feats.append(c_feats[repeat_idx])
+            balanced_y.append(np.full(max_count, c))
+        else:
+            balanced_imgs.append(c_imgs)
+            balanced_feats.append(c_feats)
+            balanced_y.append(np.full(num_c, c))
+
+    balanced_imgs = np.concatenate(balanced_imgs, axis=0)
+    balanced_feats = np.concatenate(balanced_feats, axis=0)
+    balanced_y = np.concatenate(balanced_y, axis=0)
+
+    perm = np.random.permutation(len(balanced_y))
+    print(f"✅ Balanced Training Pool: {len(balanced_y)} total samples (Exact 1:1:1:1 across MES 0, 1, 2, 3)")
+    return balanced_imgs[perm], balanced_feats[perm], balanced_y[perm]
+
 def apply_augmentation(img):
     rows, cols = img.shape[:2]
     angle = np.random.uniform(-180, 180)
@@ -241,7 +279,8 @@ def build_modse2_focused_hybrid(num_classes=4, img_shape=(256, 256, 3), dropout_
 
     # Multi-Scale Pyramid pooling: 128 + 256 + 512 = 896
     cnn_visual = Concatenate(name='Visual_MultiScale')([gap_x3, gap_x4, gap_x5])
-    cnn_visual = Dense(64, activation='relu', kernel_regularizer=l2(0.001))(cnn_visual)
+    # Open visual bottleneck: retain 256 dimensions (instead of choking to 64)
+    cnn_visual = Dense(256, activation='relu', kernel_regularizer=l2(0.001))(cnn_visual)
     cnn_visual = BatchNormalization()(cnn_visual)
     x_se2 = Dropout(dropout_rate, name='feat_cnn_proj')(cnn_visual)
 
@@ -258,8 +297,8 @@ def build_modse2_focused_hybrid(num_classes=4, img_shape=(256, 256, 3), dropout_
     um = BatchNormalization()(um)
     x_umap = Dropout(0.2, name='feat_umap_proj')(um)
 
-    # ── FUSION & 3-LAYER FEATURE EXTRACTION (The User's Core Architecture) ─────
-    # Fusion joins: Visual(64) + Handcrafted(64) + UMAP(32) = 160 dimensions
+    # ── FUSION & 3-LAYER FEATURE EXTRACTION (Smooth Flow, No Bottlenecks) ─────
+    # Fusion joins: Visual(256) + Handcrafted(64) + UMAP(32) = 352 dimensions!
     combined = Concatenate(name='Fusion')([x_se2, x_feat, x_umap])
 
     # Extraction Layer 1
@@ -540,23 +579,18 @@ def main():
     joblib.dump(scaler, os.path.join(args.save_dir, "scaler_v17.pkl"))
     joblib.dump(umap_mod, os.path.join(args.save_dir, "umap_v17.pkl"))
 
+    # ── 3.5 Balanced Physical Oversampling on Training Set (1:1:1:1) ──────────
+    X_tr_i_bal, X_tr_f_bal, y_tr_bal = balanced_oversample_dataset(X_tr_i, X_tr_f, y_tr)
+    Xtr_s_bal, Utr_bal = process_feats(X_tr_f_bal)
+    y_tr_c_bal = to_categorical(y_tr_bal, NUM_CLASSES)
+    y_va_c = to_categorical(y_va, NUM_CLASSES)
+
     # ── 4. Train Single Focused Mod-SE(2) Hybrid Model ────────────────────────
     print("\n" + "=" * 80)
     print(f"🔥 TRAINING SINGLE FOCUSED MOD-SE(2) HYBRID (Seed {SEED}) — {args.epochs} Epochs")
     print("=" * 80)
 
-    y_tr_c = to_categorical(y_tr, NUM_CLASSES)
-    y_va_c = to_categorical(y_va, NUM_CLASSES)
-    
-    # Class weights for loss
-    cw = class_weight.compute_class_weight('balanced', classes=np.unique(y_tr), y=y_tr)
-    # Boost MES1 weight slightly to fight boundary leakage
-    cw_boosted = cw.copy()
-    cw_boosted[1] *= 1.35
-    cw_dict = dict(enumerate(cw_boosted))
-    print(f"⚖️ Applied Boosted Class Weights: {cw_dict}")
-
-    tr_gen = HybridDataGenerator(X_tr_i, Xtr_s, Utr, y_tr_c, batch_size=args.batch_size, augment=True)
+    tr_gen = HybridDataGenerator(X_tr_i_bal, Xtr_s_bal, Utr_bal, y_tr_c_bal, batch_size=args.batch_size, augment=True)
     va_gen = HybridDataGenerator(X_va_i, Xva_s, Uva, y_va_c, batch_size=args.batch_size, augment=False)
 
     model_path = os.path.join(args.save_dir, "colonomind_v17_modse2_single.h5")
@@ -582,7 +616,6 @@ def main():
             tr_gen,
             validation_data=va_gen,
             epochs=args.epochs,
-            class_weight=cw_dict,
             callbacks=callbacks,
             verbose=1
         )
@@ -654,3 +687,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

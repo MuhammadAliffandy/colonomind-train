@@ -137,4 +137,28 @@ result = predict_from_image(image_path)
   5. **Multimodal Stacking Super Agent**: LightGBM + ExtraTrees tuned via 100 Optuna trials on 992-dim fusion vectors.
   6. **Differential Evolution Threshold Multipliers**: Mathematical post-processing calibration on validation set to directly maximize Exact Match Accuracy.
 
+---
+
+## 8. ColonoMind V17 Focused — Single-Run Mod-SE(2) + Active Feedback Agent Loop
+
+* **Pipeline Script**: `src/train_colonomind_v17_focused_feedback.py`
+* **Execution Script**: `run_colonomind_v17_focused.sh`
+* **Key Motivation**:
+  - Eliminates slow 5-seed loops (1 single focused run, ~35 mins execution).
+  - Directly targets the 395-sample MES0 vs MES1 boundary leakage that caused previous models to hover at ~80% Exact Match.
+* **Architecture**:
+  1. **3-Branch Hybrid**:
+     - Visual: Mod-SE(2) CNN with Multi-Scale Pooling (GAP B3 + B4 + B5) $\to$ Dense(64) + BN.
+     - Handcrafted: 28 Tissue Biomarkers (Wavelet + GLCM + Clinical Color) $\to$ Dense(64) + BN.
+     - Manifold: 2D UMAP projection $\to$ Dense(32) + BN.
+  2. **3 Dense Feature Extraction Layers**:
+     - `Fusion` (160-dim) $\to$ `Dense(256)` $\to$ `Dense(128)` $\to$ `Dense(64)` $\to$ `Softmax(4)`.
+  3. **Asymmetric Boundary Focal Loss**:
+     - 2.5x penalty on false remission (MES1 classified as MES0).
+  4. **Active Feedback Agent Loop (`feedback_agent.txt`)**:
+     - Logs uncertain samples into `feedback_train.jsonl`.
+     - LightGBM feedback agent trained with error-sample boosting.
+     - Calibrated threshold gating overrides borderline CNN predictions.
+
+
 

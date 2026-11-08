@@ -114,8 +114,8 @@ def run_active_feedback_loop(
     deep_extractor = Model(inputs=model.input, outputs=model.get_layer('deep_ext_3').output)
 
     def extract_full_profile(imgs, feats_s, umaps):
-        probs = model.predict([imgs / 255.0, feats_s, umaps], batch_size=batch_size, verbose=0)
-        deep_rep = deep_extractor.predict([imgs / 255.0, feats_s, umaps], batch_size=batch_size, verbose=0)
+        probs = model.predict([imgs / 255.0, feats_s, umaps], batch_size=64, verbose=1)
+        deep_rep = deep_extractor.predict([imgs / 255.0, feats_s, umaps], batch_size=64, verbose=1)
         confs = np.max(probs, axis=1)
         preds = np.argmax(probs, axis=1)
         entropy = scipy.stats.entropy(probs.T + 1e-7).reshape(-1, 1)
@@ -296,9 +296,9 @@ def main():
     else:
         print(f"ℹ️ Teacher probs not found at {args.teacher_probs}. Running pure self-cleaning.", flush=True)
 
-    pred = lambda m, I, F, U: m.predict([I / 255.0, F, U], batch_size=args.batch_size, verbose=0)
+    pred = lambda m, I, F, U: m.predict([I / 255.0, F, U], batch_size=64, verbose=1)
 
-    print("\n🔍 Confident-learning pass over TRAIN split (scanning 12,956 samples)...", flush=True)
+    print("\n🔍 Confident-learning pass over TRAIN split (scanning 12,956 samples with live progress bar)...", flush=True)
     P_tr = pred(base, X_tr_i, Xtr_s, Utr)
     p_given = P_tr[np.arange(len(y_tr)), y_tr]
     p_top, y_top = P_tr.max(1), P_tr.argmax(1)

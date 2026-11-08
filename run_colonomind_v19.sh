@@ -1,39 +1,50 @@
 #!/bin/bash
 # ==============================================================================
-# COLONOMIND v19 FOCUSED — SINGLE-RUN MOD-SE(2) + ACTIVE FEEDBACK AGENT
+# COLONOMIND v19 FOCUSED — AUTO-HEALING & TRAINING LAUNCHER
 # ==============================================================================
-# Core Principles:
-#   1. Single Focused Run (Seed 42) — NO slow 5-seed ensembles!
-#   2. Fast Execution (~35 mins on DGX H100 GPU)
-#   3. True 3-Branch Mod-SE(2) Architecture (Image + 28 Biomarkers + 2D UMAP)
-#   4. 3 Dense Feature Extraction Layers (256 -> 128 -> 64)
-#   5. Active Feedback Agent Loop (feedback_train.jsonl -> feedback_agent.txt)
-#   6. Elimination of MES0 vs MES1 boundary leakage with Asymmetric Loss
-# ==============================================================================
-
 set -e
 
 # Change to repo directory
 cd "$(dirname "$0")"
 
 echo "======================================================================"
-echo "🔧 STEP 1: AUTO-HEALING ENVIRONMENT (RESTORING CUDA 12 COMPATIBILITY)"
+echo "🔧 STEP 1: RESTORING CUDA 12 DRIVER COMPATIBILITY IN colono_env"
 echo "======================================================================"
 
-# Check if conflicting CUDA 13 packages exist
+# 1. Purge conflicting CUDA 13 packages if any exist
 CU13_PACKAGES=$(pip list 2>/dev/null | grep -E "cu13|13\." | awk '{print $1}' || true)
 if [ -n "$CU13_PACKAGES" ]; then
-    echo "⚠️ Detected CUDA 13 wheels conflicting with server NVIDIA driver 12.4:"
-    echo "$CU13_PACKAGES"
-    echo "🧹 Purging conflicting CUDA 13 wheels from colono_env..."
+    echo "🧹 Removing conflicting CUDA 13 packages..."
     pip list 2>/dev/null | grep -E "cu13|13\." | awk '{print $1}' | xargs -r pip uninstall -y || true
     pip uninstall -y torch torchvision 2>/dev/null || true
-    echo "✅ CUDA 13 wheels purged successfully!"
-else
-    echo "✅ Environment is clean (no conflicting CUDA 13 wheels found)."
 fi
 
-# Clean up any stale/stuck background processes
+# 2. Ensure official CUDA 12 packages for TensorFlow 2.21 are installed
+echo "📦 Installing CUDA 12 runtime & cuDNN libraries for driver 550.90 (CUDA 12.4)..."
+pip install --no-cache-dir \
+    nvidia-cuda-runtime-cu12 \
+    nvidia-cudnn-cu12 \
+    nvidia-cublas-cu12 \
+    nvidia-cufft-cu12 \
+    nvidia-curand-cu12 \
+    nvidia-cusolver-cu12 \
+    nvidia-cusparse-cu12 \
+    nvidia-nvjitlink-cu12
+
+# 3. Configure LD_LIBRARY_PATH to include nvidia pip libraries
+SITE_PACKAGES=$(python -c "import site; print(site.getsitepackages()[0])" 2>/dev/null || echo "")
+if [ -d "$SITE_PACKAGES/nvidia" ]; then
+    for sub in cuda_runtime cudnn cublas cufft curand cusolver cusparse nvjitlink; do
+        if [ -d "$SITE_PACKAGES/nvidia/$sub/lib" ]; then
+            export LD_LIBRARY_PATH="$SITE_PACKAGES/nvidia/$sub/lib:$LD_LIBRARY_PATH"
+        fi
+    done
+fi
+export LD_LIBRARY_PATH="/usr/local/cuda-12.4/lib64:/usr/local/cuda-12/lib64:/usr/local/cuda/lib64:$LD_LIBRARY_PATH"
+
+echo "✅ CUDA 12 environment successfully configured!"
+
+# 4. Clean up any stale background processes
 pkill -f "train_colonomind_v19_noise_robust.py" 2>/dev/null || true
 sleep 1
 
@@ -43,17 +54,31 @@ export PYTHONUNBUFFERED=1
 
 echo ""
 echo "======================================================================"
-echo "🧪 STEP 2: VERIFYING TENSORFLOW GPU ON NVIDIA H100 (GPU 3)"
+echo "🧪 STEP 2: VERIFYING TENSORFLOW ON NVIDIA H100 (GPU 3)"
 echo "======================================================================"
 python -c "
 import os
 os.environ['CUDA_VISIBLE_DEVICES'] = '3'
+import site, ctypes, glob
+for sp in site.getsitepackages():
+    nvidia_dir = os.path.join(sp, 'nvidia')
+    if os.path.exists(nvidia_dir):
+        for so in sorted(glob.glob(os.path.join(nvidia_dir, '*', 'lib', '*.so*'))):
+            try: ctypes.CDLL(so, mode=ctypes.RTLD_GLOBAL)
+            except Exception: pass
+
 import tensorflow as tf
 print('TF Version:', tf.__version__)
 gpus = tf.config.list_physical_devices('GPU')
 print('Visible GPUs:', gpus)
 assert len(gpus) > 0, 'No GPU detected by TensorFlow!'
-print('✅ GPU verified successfully!')
+print('✅ GPU verified successfully:', gpus[0].name)
+
+with tf.device('/GPU:0'):
+    a = tf.random.normal([1000, 1000])
+    b = tf.matmul(a, a)
+    c = tf.cast(b, tf.float16)
+    print('✅ SUCCESS: Op:Cast & MatMul executed on GPU H100 flawlessly!')
 "
 
 SAVE_DIR="../Result/ColonoMind_v19_NoiseRobust"

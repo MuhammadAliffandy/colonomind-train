@@ -27,6 +27,20 @@ except Exception:
 if "CUDA_VISIBLE_DEVICES" not in os.environ:
     os.environ["CUDA_VISIBLE_DEVICES"] = "3"
 
+# Pre-load CUDA 12 / cuDNN shared libraries from site-packages/nvidia if available
+try:
+    import site, ctypes, glob
+    for sp in site.getsitepackages():
+        nvidia_dir = os.path.join(sp, "nvidia")
+        if os.path.exists(nvidia_dir):
+            for so_path in sorted(glob.glob(os.path.join(nvidia_dir, "*", "lib", "*.so*"))):
+                try:
+                    ctypes.CDLL(so_path, mode=ctypes.RTLD_GLOBAL)
+                except Exception:
+                    pass
+except Exception:
+    pass
+
 # Force immediate unbuffered flushing to log file
 sys.stdout.reconfigure(line_buffering=True)
 sys.stderr.reconfigure(line_buffering=True)

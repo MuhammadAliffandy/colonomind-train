@@ -25,9 +25,35 @@ try:
 except Exception:
     pass
 
-# Ensure default GPU if not already set
+# Auto-probe operational GPU if CUDA_VISIBLE_DEVICES is not explicitly set
 if "CUDA_VISIBLE_DEVICES" not in os.environ:
-    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+    import subprocess
+    working_gpu = None
+    for g in [3, 0, 1, 2, 4, 5, 6, 7]:
+        probe_code = (
+            f"import os, sys; os.environ['CUDA_VISIBLE_DEVICES']='{g}'; "
+            "os.environ['TF_FORCE_GPU_ALLOW_GROWTH']='true'; "
+            "import tensorflow as tf; "
+            "gpus = tf.config.list_physical_devices('GPU'); "
+            "if not gpus: sys.exit(1); "
+            "for d in gpus: tf.config.experimental.set_memory_growth(d, True); "
+            "with tf.device('/GPU:0'): x = tf.keras.layers.Conv2D(4, (3, 3))(tf.zeros((1, 8, 8, 3))); "
+            "sys.exit(0)"
+        )
+        try:
+            res = subprocess.run([sys.executable, "-c", probe_code],
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
+            if res.returncode == 0:
+                working_gpu = str(g)
+                break
+        except Exception:
+            pass
+    if working_gpu is not None:
+        os.environ["CUDA_VISIBLE_DEVICES"] = working_gpu
+        print(f"🎯 [AUTO-PROBE] Selected operational GPU: {working_gpu}", flush=True)
+    else:
+        os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+        print("⚠️ [AUTO-PROBE] No working GPU context found, defaulting cleanly to CPU", flush=True)
 
 os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"
 
@@ -428,15 +454,15 @@ def main():
             base.set_weights(tmp.get_weights())
         print("✅ Mod-SE(2) Hybrid model initialized successfully!", flush=True)
     except Exception as e:
-        print(f"⚠️ GPU context exception ({e}). Automatically switching to High-Core CPU mode...", flush=True)
-        tf.config.set_visible_devices([], 'GPU')
-        base = build_modse2_focused_hybrid()
-        try:
-            base.load_weights(base_path)
-        except Exception:
-            from tensorflow.keras.models import load_model
-            tmp = load_model(base_path, compile=False)
-            base.set_weights(tmp.get_weights())
+        print(f"⚠️ GPU context exception ({e}). Building Mod-SE(2) safely on CPU...", flush=True)
+        with tf.device('/CPU:0'):
+            base = build_modse2_focused_hybrid()
+            try:
+                base.load_weights(base_path)
+            except Exception:
+                from tensorflow.keras.models import load_model
+                tmp = load_model(base_path, compile=False)
+                base.set_weights(tmp.get_weights())
         print("✅ Mod-SE(2) Hybrid model initialized successfully on CPU!", flush=True)
 
     teacher_p_tr, teacher_p_va, teacher_p_te = None, None, None
@@ -525,11 +551,22 @@ def main():
         ])
         print(f"⏱️ fine-tune took {(time.time() - t0) / 60:.1f} min", flush=True)
 
-    v19_best = build_modse2_focused_hybrid()
-    v19_best.load_weights(best_weights_path)
+    try:
+        v19_best = build_modse2_focused_hybrid()
+        v19_best.load_weights(best_weights_path)
+    except Exception:
+        with tf.device('/CPU:0'):
+            v19_best = build_modse2_focused_hybrid()
+            v19_best.load_weights(best_weights_path)
 
-    # Model selection on VALIDATION only
-    pred = lambda m, I, F, U: m.predict([I / 255.0, F, U], batch_size=128, verbose=0)
+    # Safe prediction function
+    def pred(m, I, F, U):
+        try:
+            return m.predict([I / 255.0, F, U], batch_size=128, verbose=0)
+        except Exception:
+            with tf.device('/CPU:0'):
+                return m.predict([I / 255.0, F, U], batch_size=128, verbose=0)
+
     cands = {"v18": base, "v19_best": v19_best}
     val_scores = {k: accuracy_score(y_va, pred(m, X_va_i, Xva_s, Uva).argmax(1)) for k, m in cands.items()}
     print("\n📋 Validation accuracy by candidate:", {k: f"{v*100:.2f}%" for k, v in val_scores.items()}, flush=True)

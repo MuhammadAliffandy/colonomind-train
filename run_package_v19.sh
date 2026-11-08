@@ -10,6 +10,17 @@ echo "======================================================================"
 echo "📦 PACKAGING COLONOMIND v19 FOR XXDRIVE & WEB INTEGRATION"
 echo "======================================================================"
 
+# Ensure CUDA libraries are linked cleanly
+SITE_PACKAGES=$(python -c "import site; print(site.getsitepackages()[0])" 2>/dev/null || echo "")
+if [ -d "$SITE_PACKAGES/nvidia" ]; then
+    for sub in cuda_runtime cudnn cublas cufft curand cusolver cusparse nvjitlink; do
+        if [ -d "$SITE_PACKAGES/nvidia/$sub/lib" ]; then
+            export LD_LIBRARY_PATH="$SITE_PACKAGES/nvidia/$sub/lib:$LD_LIBRARY_PATH"
+        fi
+    done
+fi
+export LD_LIBRARY_PATH="/usr/local/cuda-12.4/lib64:/usr/local/cuda-12/lib64:/usr/local/cuda/lib64:$LD_LIBRARY_PATH"
+
 TARGET_DEST="$HOME/xxdrive"
 if [ ! -d "$TARGET_DEST" ]; then
     echo "⚠️ Target $TARGET_DEST does not exist. Checking alternative mounts..."

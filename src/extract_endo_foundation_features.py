@@ -23,8 +23,9 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, cohen_kappa_score, confusion_matrix
 
 MODELS = {
-    "gastronet": {"repo": "BONS-AI-TUE-AMC/GastroNetDinov2", "kind": "hf_auto"},
+    # BONS-AI-TUE-AMC/GastroNetDinov2 only contains a README (no weights) -> use the weights repo
     "gastronet_weights": {"repo": "tgwboers/GastroNet-5M_Pretrained_Weights", "kind": "list_only"},
+    "gastronet": {"repo": "BONS-AI-TUE-AMC/GastroNetDinov2", "kind": "hf_auto"},
     "endovit": {"repo": "egeozsoy/EndoViT", "kind": "timm_vit"},
 }
 
@@ -49,10 +50,16 @@ def load_encoder(name, device):
             from huggingface_hub import hf_hub_download
             ckpt = hf_hub_download(repo, "pytorch_model.bin")
             model = timm.create_model("vit_base_patch16_224", pretrained=False, num_classes=0, global_pool="avg")
-            sd = torch.load(ckpt, map_location="cpu")
+            # The checkpoint pickles an argparse.Namespace. Allow-list only that class instead of
+            # disabling weights_only, so no arbitrary code can run while loading.
+            import argparse
+            torch.serialization.add_safe_globals([argparse.Namespace])
+            sd = torch.load(ckpt, map_location="cpu", weights_only=True)
             sd = sd.get("model", sd)
             missing, unexpected = model.load_state_dict(sd, strict=False)
             print(f"   missing keys: {len(missing)} | unexpected: {len(unexpected)}")
+            if len(missing) > 10:
+                raise RuntimeError(f"Encoder keys do not match timm ViT-B/16 ({len(missing)} missing): {missing[:5]}")
             return model.to(device).eval(), (lambda x: model(x))
     except Exception as e:
         print(f"❌ Could not load '{name}' from {repo}: {e}")
@@ -103,6 +110,10 @@ def main():
     os.makedirs(args.save_dir, exist_ok=True)
     import torch
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    if device == "cpu":
+        print("⚠️ CUDA not usable from this PyTorch build (driver/wheel mismatch). Running on CPU: slow.\n"
+              "   Install a cu124 wheel in a separate env, see instructions.")
+        torch.set_num_threads(min(32, os.cpu_count() or 8))
 
     d = np.load(args.v6_cache, allow_pickle=True)
     imgs, y_full = d["imgs"], LabelEncoder().fit_transform(list(d["labels"]))
@@ -154,3 +165,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

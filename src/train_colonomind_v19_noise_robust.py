@@ -27,6 +27,7 @@ print("=" * 80, flush=True)
 
 import numpy as np
 import cv2, joblib
+import umap
 import tensorflow as tf
 
 print(f"✅ TensorFlow {tf.__version__} initialized.", flush=True)
@@ -235,18 +236,31 @@ def main():
         X_tv_i, X_tv_f, y_tv, test_size=0.20, random_state=SEED, stratify=y_tv)
 
     print(f"📊 Dataset Splits: Train={len(y_tr)}, Val={len(y_va)}, Test={len(y_te)}", flush=True)
-    print("🧬 Computing feature scaling and UMAP embeddings (fast in-memory, ~35s)...", flush=True)
-    import umap
-    t_u = time.time()
-    scaler = StandardScaler().fit(X_tr_f)
-    umap_mod = umap.UMAP(n_neighbors=15, min_dist=0.1, n_components=2, random_state=SEED).fit(scaler.transform(X_tr_f))
-    Xtr_s = scaler.transform(X_tr_f)
-    Utr = umap_mod.embedding_
-    Xva_s = scaler.transform(X_va_f)
-    Uva = umap_mod.transform(Xva_s)
-    Xte_s = scaler.transform(X_te_f)
-    Ute = umap_mod.transform(Xte_s)
-    print(f"✅ UMAP embeddings ready in {time.time() - t_u:.1f}s!", flush=True)
+
+    umap_cache_file = os.path.join(args.base_dir, "umap_embeddings_cache.npz")
+    if os.path.exists(umap_cache_file):
+        print(f"⚡ Loading precomputed UMAP coordinates from {umap_cache_file} (Instant 0.1s!)...", flush=True)
+        uc = np.load(umap_cache_file)
+        Xtr_s, Utr = uc["Xtr_s"], uc["Utr"]
+        Xva_s, Uva = uc["Xva_s"], uc["Uva"]
+        Xte_s, Ute = uc["Xte_s"], uc["Ute"]
+        scaler = StandardScaler().fit(X_tr_f)
+        umap_mod = None
+    else:
+        print("🧬 Computing feature scaling and UMAP embeddings in-memory...", flush=True)
+        print("⏳ Mohon tunggu ~45 detik (JANGAN tekan Ctrl+C, sedang komputasi graf 12.956 titik)...", flush=True)
+        t_u = time.time()
+        scaler = StandardScaler().fit(X_tr_f)
+        umap_mod = umap.UMAP(n_neighbors=15, min_dist=0.1, n_components=2, random_state=SEED).fit(scaler.transform(X_tr_f))
+        Xtr_s = scaler.transform(X_tr_f)
+        Utr = umap_mod.embedding_
+        print("   Transforming Validation & Test sets...", flush=True)
+        Xva_s = scaler.transform(X_va_f)
+        Uva = umap_mod.transform(Xva_s)
+        Xte_s = scaler.transform(X_te_f)
+        Ute = umap_mod.transform(Xte_s)
+        np.savez(umap_cache_file, Xtr_s=Xtr_s, Utr=Utr, Xva_s=Xva_s, Uva=Uva, Xte_s=Xte_s, Ute=Ute)
+        print(f"✅ UMAP embeddings ready & cached in {time.time() - t_u:.1f}s!", flush=True)
 
     base_path = os.path.join(args.base_dir, "colonomind_v18_modse2.h5")
     print(f"⚡ Loading V18 checkpoint: {base_path}", flush=True)

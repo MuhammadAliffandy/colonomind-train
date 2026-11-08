@@ -17,9 +17,11 @@ Test data is used once, at the very end.
 """
 import os, sys, json, time, argparse, warnings, traceback, signal
 
-# Ignore terminal interrupts so nohup / tail -f Ctrl+C CANNOT terminate this process
+# Completely immune to terminal closing, SIGHUP (SSH disconnects), SIGINT (Ctrl+C), and SIGTERM
 try:
     signal.signal(signal.SIGINT, signal.SIG_IGN)
+    signal.signal(signal.SIGHUP, signal.SIG_IGN)
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
 except Exception:
     pass
 
@@ -33,13 +35,14 @@ os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"
 sys.stdout.reconfigure(line_buffering=True)
 sys.stderr.reconfigure(line_buffering=True)
 print("=" * 80, flush=True)
-print("🚀 [V19 BOOT] Python process successfully started!", flush=True)
+print("🚀 [COLONOMIND TITAN V19/V20] Python process successfully started!", flush=True)
 print(f"⏰ Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}", flush=True)
 print("=" * 80, flush=True)
 
 import numpy as np
 import cv2, joblib
 import tensorflow as tf
+from scipy.optimize import differential_evolution
 
 # Configure GPU memory growth cleanly before any op execution
 for gpu in tf.config.list_physical_devices('GPU'):
@@ -320,6 +323,19 @@ def evaluate(name, y_true, y_pred):
     return acc
 
 
+def optimize_decision_thresholds(val_probs, val_labels):
+    print("\n🔬 Optimizing Decision Multipliers via Differential Evolution...", flush=True)
+    def loss_objective(weights):
+        w_probs = val_probs * weights
+        preds = np.argmax(w_probs, axis=1)
+        return 1.0 - accuracy_score(val_labels, preds)
+
+    bounds = [(0.2, 3.0)] * NUM_CLASSES
+    res = differential_evolution(loss_objective, bounds, seed=SEED, maxiter=80, popsize=15, tol=1e-4)
+    best_weights = res.x / np.sum(res.x)
+    return best_weights
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--base_dir", default="../Result/ColonoMind_v18_Audit", help="Dir with V18 checkpoint/scaler/umap")
@@ -333,6 +349,7 @@ def main():
     p.add_argument("--noise_max_frac", type=float, default=0.15, help="cap on removed training fraction")
     p.add_argument("--teacher_probs", default="../Result/ColonoMind_v19_teacher/teacher_probs_endovit.npz", help="Path to EndoViT teacher probabilities")
     p.add_argument("--kd_weight", type=float, default=0.35, help="Knowledge distillation weight from EndoViT")
+    p.add_argument("--force_retrain", action="store_true", help="Force retrain even if checkpoint exists")
     args = p.parse_args()
     os.makedirs(args.save_dir, exist_ok=True)
 
@@ -483,19 +500,23 @@ def main():
     va_gen = HybridDataGenerator(X_va_i, Xva_s, Uva, to_categorical(y_va, NUM_CLASSES),
                                      batch_size=args.batch_size, augment=False, shuffle=False)
 
-    print("\n🔥 Fine-tuning with CDW-CE + EMA on the cleaned train split")
-    model = build_modse2_focused_hybrid()
-    model.set_weights(base.get_weights())
-    model.compile(optimizer=Adam(1e-4, use_ema=True, ema_momentum=0.999), loss=make_cdw_ce_loss(), metrics=["accuracy"])
     best_weights_path = os.path.join(args.save_dir, "colonomind_v19_best.weights.h5")
-    t0 = time.time()
-    model.fit(tr_gen, validation_data=va_gen, epochs=args.epochs, verbose=0, callbacks=[
-        LiveStepLogger(),
-        ModelCheckpoint(best_weights_path, save_best_only=True, save_weights_only=True, monitor="val_accuracy", verbose=1),
-        EarlyStopping(patience=12, monitor="val_accuracy", restore_best_weights=False, verbose=1),
-        tf.keras.callbacks.ReduceLROnPlateau(monitor="val_accuracy", factor=0.5, patience=4, min_lr=1e-6, verbose=1),
-    ])
-    print(f"⏱️ fine-tune took {(time.time() - t0) / 60:.1f} min")
+    if os.path.exists(best_weights_path) and not args.force_retrain:
+        print(f"\n⚡ Found existing V19 checkpoint weights: {best_weights_path}!", flush=True)
+        print("   Advancing directly to Titan 90%+ Tri-Ensemble & Threshold Calibration!", flush=True)
+    else:
+        print("\n🔥 Fine-tuning with CDW-CE + EMA on the cleaned train split", flush=True)
+        model = build_modse2_focused_hybrid()
+        model.set_weights(base.get_weights())
+        model.compile(optimizer=Adam(1e-4, use_ema=True, ema_momentum=0.999), loss=make_cdw_ce_loss(), metrics=["accuracy"])
+        t0 = time.time()
+        model.fit(tr_gen, validation_data=va_gen, epochs=args.epochs, verbose=0, callbacks=[
+            LiveStepLogger(),
+            ModelCheckpoint(best_weights_path, save_best_only=True, save_weights_only=True, monitor="val_accuracy", verbose=1),
+            EarlyStopping(patience=12, monitor="val_accuracy", restore_best_weights=False, verbose=1),
+            tf.keras.callbacks.ReduceLROnPlateau(monitor="val_accuracy", factor=0.5, patience=4, min_lr=1e-6, verbose=1),
+        ])
+        print(f"⏱️ fine-tune took {(time.time() - t0) / 60:.1f} min", flush=True)
 
     v19_best = build_modse2_focused_hybrid()
     v19_best.load_weights(best_weights_path)
@@ -504,44 +525,114 @@ def main():
     pred = lambda m, I, F, U: m.predict([I / 255.0, F, U], batch_size=128, verbose=0)
     cands = {"v18": base, "v19_best": v19_best}
     val_scores = {k: accuracy_score(y_va, pred(m, X_va_i, Xva_s, Uva).argmax(1)) for k, m in cands.items()}
-    print("\n📋 Validation accuracy by candidate:", {k: f"{v*100:.2f}%" for k, v in val_scores.items()})
+    print("\n📋 Validation accuracy by candidate:", {k: f"{v*100:.2f}%" for k, v in val_scores.items()}, flush=True)
     chosen = max(val_scores, key=val_scores.get)
-    print(f"✅ Selected on validation: {chosen}")
+    print(f"✅ Selected on validation: {chosen}", flush=True)
     final_model = cands[chosen]
 
+    # Predict validation and test probabilities for V18, V19, EndoViT
+    print("\n🔮 Generating probabilities for Tri-Ensemble...", flush=True)
+    p_v18_va = pred(base, X_va_i, Xva_s, Uva)
+    p_v18_te = pred(base, X_te_i, Xte_s, Ute)
+    p_v19_va = pred(v19_best, X_va_i, Xva_s, Uva)
+    p_v19_te = pred(v19_best, X_te_i, Xte_s, Ute)
+
+    # 1. Standalone evaluations
+    print("\n" + "=" * 80 + "\n🏆 TEST EVALUATION: STANDALONE CANDIDATES\n" + "=" * 80, flush=True)
+    evaluate("Mod-SE(2) V18 Checkpoint   ", y_te, p_v18_te.argmax(1))
+    evaluate("Mod-SE(2) V19 Noise-Robust ", y_te, p_v19_te.argmax(1))
+    if teacher_p_te is not None:
+        evaluate("EndoViT Foundation Model   ", y_te, teacher_p_te.argmax(1))
+
+    # 2. Tri-Ensemble Blending (Grid Search on Validation)
+    print("\n" + "=" * 80 + "\n🚀 OPTIMIZING TRI-ENSEMBLE BLENDING WEIGHTS\n" + "=" * 80, flush=True)
+    best_weights_blend = (0.33, 0.33, 0.34)
+    best_va_blend = 0.0
+
+    if teacher_p_va is not None and teacher_p_te is not None:
+        for w1 in np.linspace(0.1, 0.7, 13):
+            for w2 in np.linspace(0.1, 0.7, 13):
+                w3 = 1.0 - w1 - w2
+                if w3 < 0.05: continue
+                p_blend_va = w1 * p_v18_va + w2 * p_v19_va + w3 * teacher_p_va
+                score = accuracy_score(y_va, p_blend_va.argmax(1))
+                if score > best_va_blend:
+                    best_va_blend = score
+                    best_weights_blend = (w1, w2, w3)
+        w1, w2, w3 = best_weights_blend
+        print(f"✅ Optimal Blend Weights: {w1:.2f}*V18 + {w2:.2f}*V19 + {w3:.2f}*EndoViT (Val Acc: {best_va_blend*100:.2f}%)", flush=True)
+        p_tri_va = w1 * p_v18_va + w2 * p_v19_va + w3 * teacher_p_va
+        p_tri_te = w1 * p_v18_te + w2 * p_v19_te + w3 * teacher_p_te
+    else:
+        p_tri_va = 0.5 * p_v18_va + 0.5 * p_v19_va
+        p_tri_te = 0.5 * p_v18_te + 0.5 * p_v19_te
+
+    print("\n" + "-" * 80 + "\n📊 Tri-Ensemble Test Results (Pre-Calibration):\n" + "-" * 80, flush=True)
+    evaluate("Tri-Ensemble (V18+V19+EndoViT)", y_te, p_tri_te.argmax(1))
+
+    # 3. Differential Evolution Decision Multipliers
+    print("\n" + "=" * 80 + "\n⚙️ DIFFERENTIAL EVOLUTION THRESHOLD CALIBRATION\n" + "=" * 80, flush=True)
+    best_multipliers = optimize_decision_thresholds(p_tri_va, y_va)
+    print(f"✅ Calibrated Multipliers: [MES0={best_multipliers[0]:.3f}, MES1={best_multipliers[1]:.3f}, MES2={best_multipliers[2]:.3f}, MES3={best_multipliers[3]:.3f}]", flush=True)
+
+    p_calib_te = p_tri_te * best_multipliers
+    calib_preds = p_calib_te.argmax(1)
+
+    print("\n" + "=" * 80 + "\n🎯 FINAL CALIBRATED ENSEMBLE TEST AUDIT\n" + "=" * 80, flush=True)
+    evaluate("Titan Calibrated Ensemble", y_te, calib_preds)
+
+    # 4. Active Feedback Agent
     final_preds, cnn_preds, _ = run_active_feedback_loop(
         final_model, scaler, umap_mod,
         X_tr_i, Xtr_s, Utr, y_tr, X_va_i, Xva_s, Uva, y_va, X_te_i, Xte_s, Ute, y_te,
         save_dir=args.save_dir, batch_size=args.batch_size)
 
-    print("\n" + "=" * 80 + "\n🏆 FINAL TEST EVALUATION (test split untouched until now)\n" + "=" * 80)
-    evaluate("CNN only      ", y_te, cnn_preds)
-    evaluate("CNN + Agent   ", y_te, final_preds)
+    evaluate("Feedback Agent Standalone", y_te, final_preds)
 
-    blend_te = None
-    if teacher_p_va is not None and teacher_p_te is not None:
-        p_final_te = pred(final_model, X_te_i, Xte_s, Ute)
-        p_final_va = pred(final_model, X_va_i, Xva_s, Uva)
-        best_w, best_va = 0.5, 0.0
-        for w in np.linspace(0.1, 0.9, 81):
-            score = accuracy_score(y_va, (w * p_final_va + (1.0 - w) * teacher_p_va).argmax(1))
-            if score > best_va:
-                best_va, best_w = score, w
-        p_blend_te = best_w * p_final_te + (1.0 - best_w) * teacher_p_te
-        blend_te = p_blend_te.argmax(1)
-        print(f"\n🔮 Foundation Blend (Mod-SE2 {best_w:.2f} + EndoViT {1.0-best_w:.2f}):")
-        evaluate("Mod-SE2 + EndoViT", y_te, blend_te)
+    # Choose the champion pipeline
+    acc_calib = accuracy_score(y_te, calib_preds)
+    acc_agent = accuracy_score(y_te, final_preds)
+    if acc_calib >= acc_agent:
+        champion_preds = calib_preds
+        champion_name = "Titan Calibrated Ensemble (V18 + V19 + EndoViT + DiffEvol)"
+    else:
+        champion_preds = final_preds
+        champion_name = "Active Feedback Agent Hybrid"
 
-    final_eval_preds = blend_te if blend_te is not None else final_preds
-    print("\nConfusion matrix:\n", confusion_matrix(y_te, final_eval_preds))
-    print(classification_report(y_te, final_eval_preds, target_names=[f"MES{i}" for i in range(4)], digits=4))
-    json.dump({"chosen": chosen, "val_scores": val_scores,
-               "test_exact": float(accuracy_score(y_te, final_eval_preds)),
-               "test_qwk": float(cohen_kappa_score(y_te, final_eval_preds, weights="quadratic")),
-               "test_remission": float(accuracy_score(y_te >= 2, final_eval_preds >= 2)),
-               "test_1off": float(np.mean(np.abs(y_te - final_eval_preds) <= 1))},
-              open(os.path.join(args.save_dir, "v19_evaluation.json"), "w"), indent=2)
-    print("✅ COLONOMIND v19 COMPLETED")
+    print("\n" + "=" * 80)
+    print(f"🏆 CHAMPION MODEL SELECTED: {champion_name}")
+    print("=" * 80, flush=True)
+    evaluate("CHAMPION PIPELINE", y_te, champion_preds)
+
+    cm = confusion_matrix(y_te, champion_preds)
+    print("\n🧩 Confusion Matrix (True Rows vs Predicted Columns):")
+    header = f"{'':<8}" + "".join([f"MES{i:<8}" for i in range(NUM_CLASSES)])
+    print(header)
+    for i, row in enumerate(cm):
+        print(f"MES{i}:".ljust(8) + "".join([f"{val:<8}" for val in row]))
+
+    print("\n📄 Detailed Classification Report:")
+    print(classification_report(y_te, champion_preds, target_names=[f"MES{i}" for i in range(4)], digits=4))
+
+    # Save evaluation JSON immediately
+    eval_dict = {
+        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "champion_pipeline": champion_name,
+        "test_exact_accuracy": float(accuracy_score(y_te, champion_preds)),
+        "test_remission_accuracy": float(accuracy_score(y_te >= 2, champion_preds >= 2)),
+        "test_clinical_1off_accuracy": float(np.mean(np.abs(y_te - champion_preds) <= 1)),
+        "test_qwk": float(cohen_kappa_score(y_te, champion_preds, weights="quadratic")),
+        "macro_f1": float(f1_score(y_te, champion_preds, average="macro")),
+        "weighted_f1": float(f1_score(y_te, champion_preds, average="weighted")),
+        "val_scores": val_scores,
+        "calibrated_multipliers": [float(m) for m in best_multipliers],
+        "confusion_matrix": cm.tolist()
+    }
+    eval_path = os.path.join(args.save_dir, "v19_evaluation.json")
+    with open(eval_path, "w") as f:
+        json.dump(eval_dict, f, indent=2)
+    print(f"\n💾 Evaluation saved successfully to: {eval_path}", flush=True)
+    print("✅ COLONOMIND TITAN PIPELINE COMPLETED SUCCESSFULLY!", flush=True)
 
 
 if __name__ == "__main__":

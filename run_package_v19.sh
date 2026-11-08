@@ -21,6 +21,13 @@ if [ ! -d "$TARGET_DEST" ]; then
     fi
 fi
 
+# If feedback_agent.txt or v19_evaluation.json is missing, generate them instantly (~30s)
+if [ ! -f "../Result/ColonoMind_v19_NoiseRobust/feedback_agent.txt" ] || [ ! -f "../Result/ColonoMind_v19_NoiseRobust/v19_evaluation.json" ]; then
+    echo "⚡ feedback_agent.txt or v19_evaluation.json not found yet."
+    echo "🚀 Running fast zero-hang calibration & feedback generation (~30s)..."
+    python src/train_colonomind_v19_noise_robust.py
+fi
+
 python src/package_v19_to_xxdrive.py --dest "$TARGET_DEST"
 
 echo ""
@@ -31,3 +38,4 @@ echo "Output files ready in:"
 echo "  1. Directory : $TARGET_DEST/ColonoMind_V19_Package"
 echo "  2. ZIP File  : $TARGET_DEST/colonomind_v19_package.zip"
 echo "======================================================================"
+

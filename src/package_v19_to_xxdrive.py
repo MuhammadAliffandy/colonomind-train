@@ -479,3 +479,4 @@ result = predict_from_image(image_path)
 
 if __name__ == "__main__":
     main()
+

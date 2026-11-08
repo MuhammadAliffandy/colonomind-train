@@ -252,19 +252,25 @@ def run_active_feedback_loop(
     X_fb_va_s = fb_scaler.transform(X_fb_va)
     X_fb_te_s = fb_scaler.transform(X_fb_te)
 
+    print("  -> Fitting LightGBM Feedback Agent on Train Profile (Zero-hang mode)...", flush=True)
     agent = lgb.LGBMClassifier(
-        n_estimators=250, learning_rate=0.03, num_leaves=15, max_depth=5,
-        min_child_samples=25, subsample=0.8, subsample_freq=1, colsample_bytree=0.7,
-        reg_lambda=5.0, random_state=SEED, n_jobs=-1, verbose=-1
+        n_estimators=150, learning_rate=0.04, num_leaves=31, max_depth=6,
+        min_child_samples=20, subsample=0.8, colsample_bytree=0.8,
+        reg_lambda=2.0, random_state=SEED, n_jobs=4, verbose=-1
     )
+    # Train directly on the 12,956 training samples (finishes in ~1.5 seconds, zero OpenMP deadlock)
+    agent.fit(X_fb_tr_s, y_tr)
 
-    skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=SEED)
-    agent_probs_va = cross_val_predict(agent, X_fb_va_s, y_va, cv=skf, method='predict_proba')
-    agent.fit(X_fb_va_s, y_va)
+    # Save the feedback agent booster and scaler immediately to disk
+    agent_save_path = os.path.join(save_dir, "feedback_agent.txt")
+    agent.booster_.save_model(agent_save_path)
+    joblib.dump(fb_scaler, os.path.join(save_dir, "fb_scaler.pkl"))
+    print(f"  💾 Feedback Agent booster saved to: {agent_save_path}", flush=True)
+
+    agent_probs_va = agent.predict_proba(X_fb_va_s)
     agent_probs_te = agent.predict_proba(X_fb_te_s)
 
     best_thresh, best_exact_va = 0.80, 0.0
-    conf_va, pred_va = conf_va, pred_va
     for thr in np.arange(0.50, 0.95, 0.02):
         hybrid_va = []
         for i in range(len(y_va)):
@@ -290,6 +296,7 @@ def run_active_feedback_loop(
             final_test_preds.append(np.argmax(agent_probs_te[i]))
             agent_overrides += 1
 
+    print(f"  ✅ Feedback Agent optimization complete! Overrides: {agent_overrides}/{len(y_te)} borderline cases", flush=True)
     return np.array(final_test_preds), pred_te, agent_probs_te
 
 

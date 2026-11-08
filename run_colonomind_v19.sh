@@ -48,30 +48,46 @@ sleep 1
 
 export TF_CPP_MIN_LOG_LEVEL=2
 export TF_FORCE_GPU_ALLOW_GROWTH=true
-export CUDA_VISIBLE_DEVICES=3
 export PYTHONUNBUFFERED=1
-
-echo "✅ Environment configured with CUDA 12 + dynamic GPU memory growth!"
 
 echo ""
 echo "======================================================================"
-echo "🧪 STEP 2: VERIFYING TENSORFLOW KERNEL ON NVIDIA H100 (GPU 3)"
+echo "🧪 STEP 2: AUTO-SELECTING ACTIVE WORKING GPU ON NVIDIA DGX H100"
 echo "======================================================================"
-python -c "
+
+WORKING_GPU=""
+for g in 0 1 2 3 4 5 6 7; do
+    echo -n "   Probing GPU $g ... "
+    if python -c "
+import os, sys
+os.environ['CUDA_VISIBLE_DEVICES'] = '$g'
+os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 import tensorflow as tf
-print('TF Version:', tf.__version__)
 gpus = tf.config.list_physical_devices('GPU')
-print('Visible GPUs:', gpus)
-assert len(gpus) > 0, 'No GPU detected by TensorFlow!'
-
-for g in gpus:
-    tf.config.experimental.set_memory_growth(g, True)
-
+if not gpus: sys.exit(1)
+for d in gpus: tf.config.experimental.set_memory_growth(d, True)
 with tf.device('/GPU:0'):
     a = tf.constant([[1.0, 2.0], [3.0, 4.0]])
     b = tf.matmul(a, a)
-    print('✅ SUCCESS: GPU H100 MatMul verified! Result:\n', b.numpy())
-"
+    x = tf.keras.layers.Conv2D(8, (3, 3), padding='same')(tf.random.normal([1, 16, 16, 3]))
+sys.exit(0)
+" 2>/dev/null; then
+        echo "✅ SUCCESS! GPU $g is 100% operational!"
+        WORKING_GPU="$g"
+        break
+    else
+        echo "❌ unavailable / busy"
+    fi
+done
+
+if [ -n "$WORKING_GPU" ]; then
+    export CUDA_VISIBLE_DEVICES="$WORKING_GPU"
+    echo "🎯 Running pipeline on GPU $WORKING_GPU (NVIDIA H100)"
+else
+    echo "⚠️ All GPUs returned context lock. Automatically using High-Performance CPU mode."
+    export CUDA_VISIBLE_DEVICES="-1"
+fi
 
 SAVE_DIR="../Result/ColonoMind_v19_NoiseRobust"
 LOG_FILE="colonomind_v19.log"

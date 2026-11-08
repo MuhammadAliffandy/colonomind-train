@@ -23,9 +23,9 @@ try:
 except Exception:
     pass
 
-# Ensure using idle GPU 3 if not already set
+# Ensure default GPU if not already set
 if "CUDA_VISIBLE_DEVICES" not in os.environ:
-    os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"
 
@@ -393,18 +393,27 @@ def main():
     umap_mod = None
 
     base_path = os.path.join(args.base_dir, "colonomind_v18_modse2.h5")
-    print(f"⚡ Building Mod-SE(2) Hybrid model on GPU H100 and loading weights...", flush=True)
-    base = build_modse2_focused_hybrid()
+    print(f"⚡ Initializing Mod-SE(2) Hybrid model & loading checkpoint...", flush=True)
     try:
-        base.load_weights(base_path)
-        print("✅ V18 weights loaded directly onto GPU Mod-SE(2) Hybrid model!", flush=True)
-    except Exception:
-        with tf.device("/CPU:0"):
+        base = build_modse2_focused_hybrid()
+        try:
+            base.load_weights(base_path)
+        except Exception:
             from tensorflow.keras.models import load_model
             tmp = load_model(base_path, compile=False)
-            weights = tmp.get_weights()
-        base.set_weights(weights)
-        print("✅ Transferred V18 weights to native GPU Mod-SE(2) Hybrid model!", flush=True)
+            base.set_weights(tmp.get_weights())
+        print("✅ Mod-SE(2) Hybrid model initialized successfully!", flush=True)
+    except Exception as e:
+        print(f"⚠️ GPU context exception ({e}). Automatically switching to High-Core CPU mode...", flush=True)
+        tf.config.set_visible_devices([], 'GPU')
+        base = build_modse2_focused_hybrid()
+        try:
+            base.load_weights(base_path)
+        except Exception:
+            from tensorflow.keras.models import load_model
+            tmp = load_model(base_path, compile=False)
+            base.set_weights(tmp.get_weights())
+        print("✅ Mod-SE(2) Hybrid model initialized successfully on CPU!", flush=True)
 
     teacher_p_tr, teacher_p_va, teacher_p_te = None, None, None
     if os.path.exists(args.teacher_probs):

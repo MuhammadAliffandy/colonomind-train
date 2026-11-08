@@ -26,7 +26,7 @@ print(f"⏰ Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}", flush=True)
 print("=" * 80, flush=True)
 
 import numpy as np
-import cv2, joblib, umap
+import cv2, joblib
 import tensorflow as tf
 
 print(f"✅ TensorFlow {tf.__version__} initialized.", flush=True)
@@ -248,6 +248,7 @@ def main():
 
     print(f"📊 Dataset Splits: Train={len(y_tr)}, Val={len(y_va)}, Test={len(y_te)}", flush=True)
     print("🧬 Computing feature scaling and UMAP embeddings (fast in-memory, ~35s)...", flush=True)
+    import umap
     t_u = time.time()
     scaler = StandardScaler().fit(X_tr_f)
     umap_mod = umap.UMAP(n_neighbors=15, min_dist=0.1, n_components=2, random_state=SEED).fit(scaler.transform(X_tr_f))

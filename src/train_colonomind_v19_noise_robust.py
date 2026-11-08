@@ -43,23 +43,144 @@ if gpus:
 else:
     print("⚠️ No physical GPU detected by TensorFlow!", flush=True)
 
-from tensorflow.keras.models import load_model
+from tensorflow.keras.models import Model, load_model
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping
-from tensorflow.keras.utils import to_categorical
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder
+from tensorflow.keras.utils import to_categorical, Sequence
+from sklearn.model_selection import train_test_split, cross_val_predict, StratifiedKFold
+from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.metrics import accuracy_score, confusion_matrix, f1_score, cohen_kappa_score, classification_report
+import scipy.stats
+import lightgbm as lgb
 
 warnings.filterwarnings("ignore")
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, HERE)
-print("📦 Loading base modules from v18...", flush=True)
-import train_colonomind_v18_audit_ordinal as v18
-print("✅ V18 base module successfully imported!", flush=True)
+NUM_CLASSES = 4
+SEED = 42
 
-NUM_CLASSES, SEED = v18.NUM_CLASSES, v18.SEED
+def apply_augmentation(img):
+    rows, cols = img.shape[:2]
+    angle = np.random.uniform(-30, 30)
+    tx = np.random.uniform(-0.12, 0.12) * cols
+    ty = np.random.uniform(-0.12, 0.12) * rows
+    M = cv2.getRotationMatrix2D((cols / 2, rows / 2), angle, 1.0)
+    M[0, 2] += tx
+    M[1, 2] += ty
+    aug = cv2.warpAffine(img, M, (cols, rows), borderMode=cv2.BORDER_REFLECT)
+    if np.random.rand() > 0.5:
+        aug = cv2.flip(aug, 1)
+    if np.random.rand() > 0.5:
+        aug = cv2.flip(aug, 0)
+    if np.random.rand() > 0.5:
+        gamma = np.random.uniform(0.85, 1.15)
+        inv_gamma = 1.0 / gamma
+        table = np.array([((i / 255.0) ** inv_gamma) * 255 for i in range(256)]).astype("uint8")
+        aug = cv2.LUT(aug, table)
+    return aug
+
+class HybridDataGenerator(Sequence):
+    def __init__(self, images, features, umaps, labels, batch_size=16, augment=False, shuffle=True):
+        self.batch_size = batch_size
+        self.augment = augment
+        self.shuffle = shuffle
+        self.images = images
+        self.features = features
+        self.umaps = umaps
+        self.labels = labels
+        self.indices = np.arange(len(labels))
+        self.on_epoch_end()
+
+    def __len__(self):
+        return max(1, len(self.labels) // self.batch_size)
+
+    def __getitem__(self, idx):
+        bidx = self.indices[idx * self.batch_size : (idx + 1) * self.batch_size]
+        X_img = self.images[bidx].copy()
+        if self.augment:
+            for i in range(len(X_img)):
+                X_img[i] = apply_augmentation(X_img[i].astype(np.uint8)).astype(np.float32)
+        X_feat = self.features[bidx].copy()
+        X_umap = self.umaps[bidx].copy()
+        y = self.labels[bidx].copy()
+        return (X_img / 255.0, X_feat, X_umap), y
+
+    def on_epoch_end(self):
+        if self.shuffle:
+            np.random.shuffle(self.indices)
+
+def run_active_feedback_loop(
+    model, scaler, umap_mod,
+    X_tr_i, X_tr_f, X_tr_u, y_tr,
+    X_va_i, X_va_f, X_va_u, y_va,
+    X_te_i, X_te_f, X_te_u, y_te,
+    save_dir, batch_size=16
+):
+    print("\n" + "=" * 80)
+    print("🤖 ACTIVE FEEDBACK AGENT TRAINING (Boundary Error Elimination Loop)")
+    print("=" * 80, flush=True)
+
+    deep_extractor = Model(inputs=model.input, outputs=model.get_layer('deep_ext_3').output)
+
+    def extract_full_profile(imgs, feats_s, umaps):
+        probs = model.predict([imgs / 255.0, feats_s, umaps], batch_size=batch_size, verbose=0)
+        deep_rep = deep_extractor.predict([imgs / 255.0, feats_s, umaps], batch_size=batch_size, verbose=0)
+        confs = np.max(probs, axis=1)
+        preds = np.argmax(probs, axis=1)
+        entropy = scipy.stats.entropy(probs.T + 1e-7).reshape(-1, 1)
+        profile = np.hstack([probs, confs.reshape(-1, 1), entropy, umaps, feats_s, deep_rep])
+        return profile, probs, confs, preds
+
+    print("  -> Profiling Training Set...", flush=True)
+    X_fb_tr, prob_tr, conf_tr, pred_tr = extract_full_profile(X_tr_i, X_tr_f, X_tr_u)
+    print("  -> Profiling Validation Set...", flush=True)
+    X_fb_va, prob_va, conf_va, pred_va = extract_full_profile(X_va_i, X_va_f, X_va_u)
+    print("  -> Profiling Testing Set...", flush=True)
+    X_fb_te, prob_te, conf_te, pred_te = extract_full_profile(X_te_i, X_te_f, X_te_u)
+
+    fb_scaler = StandardScaler()
+    X_fb_tr_s = fb_scaler.fit_transform(X_fb_tr)
+    X_fb_va_s = fb_scaler.transform(X_fb_va)
+    X_fb_te_s = fb_scaler.transform(X_fb_te)
+
+    agent = lgb.LGBMClassifier(
+        n_estimators=250, learning_rate=0.03, num_leaves=15, max_depth=5,
+        min_child_samples=25, subsample=0.8, subsample_freq=1, colsample_bytree=0.7,
+        reg_lambda=5.0, random_state=SEED, n_jobs=-1, verbose=-1
+    )
+
+    skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=SEED)
+    agent_probs_va = cross_val_predict(agent, X_fb_va_s, y_va, cv=skf, method='predict_proba')
+    agent.fit(X_fb_va_s, y_va)
+    agent_probs_te = agent.predict_proba(X_fb_te_s)
+
+    best_thresh, best_exact_va = 0.80, 0.0
+    conf_va, pred_va = conf_va, pred_va
+    for thr in np.arange(0.50, 0.95, 0.02):
+        hybrid_va = []
+        for i in range(len(y_va)):
+            c_conf, c_pred = conf_va[i], pred_va[i]
+            p0, p1 = prob_va[i, 0], prob_va[i, 1]
+            is_border = abs(p0 - p1) < 0.25 and (c_pred in [0, 1])
+            if c_conf >= thr and not is_border:
+                hybrid_va.append(c_pred)
+            else:
+                hybrid_va.append(np.argmax(agent_probs_va[i]))
+        acc = accuracy_score(y_va, hybrid_va)
+        if acc > best_exact_va:
+            best_exact_va, best_thresh = acc, thr
+
+    final_test_preds, agent_overrides = [], 0
+    for i in range(len(y_te)):
+        c_conf, c_pred = conf_te[i], pred_te[i]
+        p0, p1 = prob_te[i, 0], prob_te[i, 1]
+        is_border = abs(p0 - p1) < 0.25 and (c_pred in [0, 1])
+        if c_conf >= best_thresh and not is_border:
+            final_test_preds.append(c_pred)
+        else:
+            final_test_preds.append(np.argmax(agent_probs_te[i]))
+            agent_overrides += 1
+
+    return np.array(final_test_preds), pred_te, agent_probs_te
 
 
 def ordinal_soft_labels(y, sigma=0.55):
@@ -198,8 +319,8 @@ def main():
     else:
         train_targets = soft_targets
 
-    tr_gen = v18.HybridDataGenerator(Xi, Xf, Xu, train_targets, batch_size=args.batch_size, augment=True)
-    va_gen = v18.HybridDataGenerator(X_va_i, Xva_s, Uva, to_categorical(y_va, NUM_CLASSES),
+    tr_gen = HybridDataGenerator(Xi, Xf, Xu, train_targets, batch_size=args.batch_size, augment=True)
+    va_gen = HybridDataGenerator(X_va_i, Xva_s, Uva, to_categorical(y_va, NUM_CLASSES),
                                      batch_size=args.batch_size, augment=False, shuffle=False)
 
     print("\n🔥 Fine-tuning with CDW-CE + EMA on the cleaned train split")
@@ -224,7 +345,7 @@ def main():
     print(f"✅ Selected on validation: {chosen}")
     final_model = cands[chosen]
 
-    final_preds, cnn_preds, _ = v18.run_active_feedback_loop(
+    final_preds, cnn_preds, _ = run_active_feedback_loop(
         final_model, scaler, umap_mod,
         X_tr_i, Xtr_s, Utr, y_tr, X_va_i, Xva_s, Uva, y_va, X_te_i, Xte_s, Ute, y_te,
         save_dir=args.save_dir, batch_size=args.batch_size)

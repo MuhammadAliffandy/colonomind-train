@@ -15,19 +15,33 @@ techniques the literature recommends for noisy ordinal medical labels:
   5. Held-out-validation Feedback Agent (same as V18).
 Test data is used once, at the very end.
 """
-import os, sys, json, time, argparse, warnings
+import os, sys, json, time, argparse, warnings, traceback
+
+# Force immediate unbuffered flushing to log file
+sys.stdout.reconfigure(line_buffering=True)
+sys.stderr.reconfigure(line_buffering=True)
+print("=" * 80, flush=True)
+print("🚀 [V19 BOOT] Python process successfully started!", flush=True)
+print(f"⏰ Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}", flush=True)
+print("=" * 80, flush=True)
+
 import numpy as np
 import cv2, joblib
 import tensorflow as tf
 
+print(f"✅ TensorFlow {tf.__version__} initialized.", flush=True)
+
 # Enable GPU dynamic memory allocation to prevent instant crash
 gpus = tf.config.list_physical_devices('GPU')
 if gpus:
+    print(f"🎮 Found {len(gpus)} GPU(s): {[g.name for g in gpus]}", flush=True)
     for gpu in gpus:
         try:
             tf.config.experimental.set_memory_growth(gpu, True)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"⚠️ Memory growth notice: {e}", flush=True)
+else:
+    print("⚠️ No physical GPU detected by TensorFlow!", flush=True)
 
 from tensorflow.keras.models import load_model
 from tensorflow.keras.optimizers import Adam
@@ -41,7 +55,9 @@ warnings.filterwarnings("ignore")
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+print("📦 Loading base modules from v18...", flush=True)
 import train_colonomind_v18_audit_ordinal as v18
+print("✅ V18 base module successfully imported!", flush=True)
 
 NUM_CLASSES, SEED = v18.NUM_CLASSES, v18.SEED
 
@@ -110,11 +126,19 @@ def main():
         X_tv_i, X_tv_f, y_tv, test_size=0.20, random_state=SEED, stratify=y_tv)
 
     print(f"📊 Dataset Splits: Train={len(y_tr)}, Val={len(y_va)}, Test={len(y_te)}", flush=True)
-    print("🧬 Computing feature scaling and UMAP embeddings...", flush=True)
+    print("🧬 Loading feature scaler and UMAP models...", flush=True)
     scaler = joblib.load(os.path.join(args.base_dir, "scaler_v17.pkl"))
     umap_mod = joblib.load(os.path.join(args.base_dir, "umap_v17.pkl"))
     proc = lambda f: (scaler.transform(f), umap_mod.transform(scaler.transform(f)))
-    Xtr_s, Utr = proc(X_tr_f); Xva_s, Uva = proc(X_va_f); Xte_s, Ute = proc(X_te_f)
+
+    print("🧬 Transforming UMAP for Validation (3,240)...", flush=True)
+    Xva_s, Uva = proc(X_va_f)
+    print("🧬 Transforming UMAP for Test (4,049)...", flush=True)
+    Xte_s, Ute = proc(X_te_f)
+    print("🧬 Transforming UMAP for Train (12,956)...", flush=True)
+    t_u = time.time()
+    Xtr_s, Utr = proc(X_tr_f)
+    print(f"✅ UMAP transformation completed in {time.time() - t_u:.1f}s!", flush=True)
 
     base_path = os.path.join(args.base_dir, "colonomind_v18_modse2.h5")
     print(f"⚡ Loading V18 checkpoint: {base_path}", flush=True)
@@ -236,5 +260,12 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        print("\n" + "!" * 80, flush=True)
+        print("❌ FATAL ERROR IN V19 EXECUTION:", flush=True)
+        traceback.print_exc()
+        print("!" * 80, flush=True)
+        sys.exit(1)
 

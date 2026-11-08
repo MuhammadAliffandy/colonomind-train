@@ -82,31 +82,36 @@ def main():
     os.makedirs(args.save_dir, exist_ok=True)
 
     cache = args.v6_cache if os.path.exists(args.v6_cache) else args.v15_cache
+    print(f"📦 Loading dataset cache from {cache}...", flush=True)
     d = np.load(cache, allow_pickle=True)
     imgs, feats, labels = d["imgs"], d["feats"], list(d["labels"])
     if imgs.shape[1] != args.img_size:
+        print(f"🔄 Resizing {len(imgs)} images to {args.img_size}x{args.img_size}...", flush=True)
         imgs = np.array([cv2.resize(i.astype(np.uint8), (args.img_size, args.img_size), interpolation=cv2.INTER_CUBIC)
                          for i in imgs], dtype=np.float32)
     y_full = LabelEncoder().fit_transform(labels)
 
+    print(f"🔄 Splitting 20,245 images into Train/Val/Test (Identical to V18)...", flush=True)
     # Identical splits to V18 -> same test set, no leakage between versions
     X_tv_i, X_te_i, X_tv_f, X_te_f, y_tv, y_te = train_test_split(
         imgs, feats, y_full, test_size=0.20, random_state=SEED, stratify=y_full)
     X_tr_i, X_va_i, X_tr_f, X_va_f, y_tr, y_va = train_test_split(
         X_tv_i, X_tv_f, y_tv, test_size=0.20, random_state=SEED, stratify=y_tv)
 
+    print(f"📊 Dataset Splits: Train={len(y_tr)}, Val={len(y_va)}, Test={len(y_te)}", flush=True)
+    print("🧬 Computing feature scaling and UMAP embeddings...", flush=True)
     scaler = joblib.load(os.path.join(args.base_dir, "scaler_v17.pkl"))
     umap_mod = joblib.load(os.path.join(args.base_dir, "umap_v17.pkl"))
     proc = lambda f: (scaler.transform(f), umap_mod.transform(scaler.transform(f)))
     Xtr_s, Utr = proc(X_tr_f); Xva_s, Uva = proc(X_va_f); Xte_s, Ute = proc(X_te_f)
 
     base_path = os.path.join(args.base_dir, "colonomind_v18_modse2.h5")
-    print(f"⚡ Loading V18 checkpoint: {base_path}")
+    print(f"⚡ Loading V18 checkpoint: {base_path}", flush=True)
     base = load_model(base_path, compile=False)
 
     pred = lambda m, I, F, U: m.predict([I / 255.0, F, U], batch_size=args.batch_size, verbose=0)
 
-    print("\n🔍 Confident-learning pass over TRAIN split")
+    print("\n🔍 Confident-learning pass over TRAIN split (scanning 12,956 samples)...", flush=True)
     P_tr = pred(base, X_tr_i, Xtr_s, Utr)
     p_given = P_tr[np.arange(len(y_tr)), y_tr]
     p_top, y_top = P_tr.max(1), P_tr.argmax(1)
@@ -171,3 +176,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

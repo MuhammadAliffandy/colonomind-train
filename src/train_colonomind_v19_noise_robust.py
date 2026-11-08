@@ -35,7 +35,12 @@ import tensorflow as tf
 
 print(f"✅ TensorFlow {tf.__version__} initialized.", flush=True)
 
-from tensorflow.keras.models import Model, load_model
+from tensorflow.keras.models import Model
+from tensorflow.keras.layers import (
+    Input, Conv2D, Dense, Dropout, BatchNormalization, Activation,
+    GlobalAveragePooling2D, MaxPooling2D, Multiply, Concatenate, Reshape
+)
+from tensorflow.keras.regularizers import l2
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping
 from tensorflow.keras.utils import to_categorical, Sequence
@@ -49,6 +54,80 @@ warnings.filterwarnings("ignore")
 
 NUM_CLASSES = 4
 SEED = 42
+
+def se_block(x, ratio=8):
+    f = x.shape[-1]
+    se = GlobalAveragePooling2D()(x)
+    se = Reshape((1, 1, f))(se)
+    se = Dense(max(1, f // ratio), activation='relu', use_bias=False)(se)
+    se = Dense(f, activation='sigmoid', use_bias=False)(se)
+    return Multiply()([x, se])
+
+def build_modse2_focused_hybrid(num_classes=4, img_shape=(256, 256, 3), dropout_rate=0.15, feat_dim=28):
+    inp_img = Input(shape=img_shape, name='image_input_se2')
+    
+    # Block 1 (Stem)
+    x = Conv2D(32, (3, 3), padding='same')(inp_img)
+    x = BatchNormalization()(x); x = Activation('relu')(x)
+    x = se_block(x, 8); x = MaxPooling2D((2, 2))(x); x = Dropout(0.05)(x)
+    
+    # Block 2
+    x = Conv2D(64, (3, 3), padding='same')(x)
+    x = BatchNormalization()(x); x = Activation('relu')(x)
+    x = se_block(x, 8); x = MaxPooling2D((2, 2))(x); x = Dropout(0.05)(x)
+    
+    # Block 3 (Vascular Layer)
+    x3 = Conv2D(128, (3, 3), padding='same')(x)
+    x3 = BatchNormalization()(x3); x3 = Activation('relu')(x3)
+    x3 = se_block(x3, 8)
+    gap_x3 = GlobalAveragePooling2D()(x3)
+    x = MaxPooling2D((2, 2))(x3); x = Dropout(0.10)(x)
+    
+    # Block 4 (Friability Layer)
+    x4 = Conv2D(256, (3, 3), padding='same')(x)
+    x4 = BatchNormalization()(x4); x4 = Activation('relu')(x4)
+    x4 = se_block(x4, 8)
+    gap_x4 = GlobalAveragePooling2D()(x4)
+    x = MaxPooling2D((2, 2))(x4); x = Dropout(0.15)(x)
+    
+    # Block 5 (Ulcer & Severe Mucosa)
+    x5 = Conv2D(512, (3, 3), padding='same')(x)
+    x5 = BatchNormalization()(x5); x5 = Activation('relu')(x5)
+    x5 = se_block(x5, 8)
+    gap_x5 = GlobalAveragePooling2D()(x5)
+
+    cnn_visual = Concatenate(name='Visual_MultiScale')([gap_x3, gap_x4, gap_x5])
+    cnn_visual = Dense(256, activation='relu', kernel_regularizer=l2(1e-4))(cnn_visual)
+    cnn_visual = BatchNormalization()(cnn_visual)
+    x_se2 = Dropout(dropout_rate, name='feat_cnn_proj')(cnn_visual)
+
+    inp_feat = Input(shape=(feat_dim,), name='feat_input')
+    fh = BatchNormalization()(inp_feat)
+    fh = Dense(64, activation='relu', kernel_regularizer=l2(1e-4))(fh)
+    fh = BatchNormalization()(fh)
+    x_feat = Dropout(dropout_rate, name='feat_hand_proj')(fh)
+
+    inp_umap = Input(shape=(2,), name='umap_feat_input')
+    um = Dense(32, activation='relu', kernel_regularizer=l2(1e-4))(inp_umap)
+    um = BatchNormalization()(um)
+    x_umap = Dropout(0.2, name='feat_umap_proj')(um)
+
+    combined = Concatenate(name='Fusion')([x_se2, x_feat, x_umap])
+    x_ext1 = Dense(256, activation='relu', kernel_regularizer=l2(1e-4), name='deep_ext_1')(combined)
+    x_ext1 = BatchNormalization()(x_ext1)
+    x_ext1 = Dropout(0.20)(x_ext1)
+
+    x_ext2 = Dense(128, activation='relu', kernel_regularizer=l2(1e-4), name='deep_ext_2')(x_ext1)
+    x_ext2 = BatchNormalization()(x_ext2)
+    x_ext2 = Dropout(0.15)(x_ext2)
+
+    x_ext3 = Dense(64, activation='relu', kernel_regularizer=l2(1e-4), name='deep_ext_3')(x_ext2)
+    x_ext3 = BatchNormalization()(x_ext3)
+    x_ext3 = Dropout(0.10)(x_ext3)
+
+    output = Dense(num_classes, activation='softmax', name='output')(x_ext3)
+    model = Model(inputs=[inp_img, inp_feat, inp_umap], outputs=output, name='ColonoMind_ModSE2_Hybrid')
+    return model
 
 def apply_augmentation(img):
     rows, cols = img.shape[:2]
@@ -277,14 +356,18 @@ def main():
     print(f"✅ 2D Manifold ready in 0.1s! (Shapes: Train={Utr.shape}, Val={Uva.shape}, Test={Ute.shape})", flush=True)
     umap_mod = None
 
-    def safe_load_model(filepath):
-        with tf.device("/CPU:0"):
-            return load_model(filepath, compile=False)
-
     base_path = os.path.join(args.base_dir, "colonomind_v18_modse2.h5")
-    print(f"⚡ Loading V18 checkpoint safely on CPU: {base_path}", flush=True)
-    base = safe_load_model(base_path)
-    print("✅ V18 model successfully deserialized!", flush=True)
+    print(f"⚡ Building Mod-SE(2) Hybrid model on GPU H100 and loading weights...", flush=True)
+    base = build_modse2_focused_hybrid()
+    try:
+        base.load_weights(base_path)
+        print("✅ V18 weights loaded directly onto GPU H100!", flush=True)
+    except Exception:
+        with tf.device("/CPU:0"):
+            from tensorflow.keras.models import load_model
+            tmp = load_model(base_path, compile=False)
+            base.set_weights(tmp.get_weights())
+        print("✅ Transferred V18 weights to native GPU H100 model!", flush=True)
 
     teacher_p_tr, teacher_p_va, teacher_p_te = None, None, None
     if os.path.exists(args.teacher_probs):
@@ -296,18 +379,10 @@ def main():
     else:
         print(f"ℹ️ Teacher probs not found at {args.teacher_probs}. Running pure self-cleaning.", flush=True)
 
-    print("\n🔍 Confident-learning pass over TRAIN split (scanning 12,956 samples)...", flush=True)
-    chunk_sz = 128
-    P_tr_list = []
-    tot = len(X_tr_i)
-    for s_idx in range(0, tot, chunk_sz):
-        e_idx = min(s_idx + chunk_sz, tot)
-        p_chunk = base.predict_on_batch([X_tr_i[s_idx:e_idx] / 255.0, Xtr_s[s_idx:e_idx], Utr[s_idx:e_idx]])
-        P_tr_list.append(p_chunk)
-        if (s_idx // chunk_sz) % 25 == 0 or e_idx == tot:
-            print(f"   📊 Progress: {e_idx:,} / {tot:,} images scanned ({e_idx/tot*100:.0f}%)...", flush=True)
-    P_tr = np.vstack(P_tr_list)
-    print("✅ Completed scan of 12,956 samples!", flush=True)
+    print("\n🔍 Confident-learning pass over TRAIN split (scanning 12,956 samples on GPU H100)...", flush=True)
+    t_scan = time.time()
+    P_tr = base.predict([X_tr_i / 255.0, Xtr_s, Utr], batch_size=128, verbose=1)
+    print(f"✅ Completed GPU scan of 12,956 samples in {time.time() - t_scan:.1f}s!", flush=True)
     p_given = P_tr[np.arange(len(y_tr)), y_tr]
     p_top, y_top = P_tr.max(1), P_tr.argmax(1)
 
@@ -353,21 +428,24 @@ def main():
                                      batch_size=args.batch_size, augment=False, shuffle=False)
 
     print("\n🔥 Fine-tuning with CDW-CE + EMA on the cleaned train split")
-    model = safe_load_model(base_path)
+    model = build_modse2_focused_hybrid()
+    model.set_weights(base.get_weights())
     model.compile(optimizer=Adam(1e-4, use_ema=True, ema_momentum=0.999), loss=make_cdw_ce_loss(), metrics=["accuracy"])
-    best_path = os.path.join(args.save_dir, "colonomind_v19_best.h5")
+    best_weights_path = os.path.join(args.save_dir, "colonomind_v19_best.weights.h5")
     t0 = time.time()
     model.fit(tr_gen, validation_data=va_gen, epochs=args.epochs, verbose=2, callbacks=[
-        ModelCheckpoint(best_path, save_best_only=True, monitor="val_accuracy", verbose=1),
+        ModelCheckpoint(best_weights_path, save_best_only=True, save_weights_only=True, monitor="val_accuracy", verbose=1),
         EarlyStopping(patience=12, monitor="val_accuracy", restore_best_weights=False, verbose=1),
         tf.keras.callbacks.ReduceLROnPlateau(monitor="val_accuracy", factor=0.5, patience=4, min_lr=1e-6, verbose=1),
     ])
     print(f"⏱️ fine-tune took {(time.time() - t0) / 60:.1f} min")
-    ema_path = os.path.join(args.save_dir, "colonomind_v19_ema.h5")
-    model.save(ema_path)
+
+    v19_best = build_modse2_focused_hybrid()
+    v19_best.load_weights(best_weights_path)
 
     # Model selection on VALIDATION only
-    cands = {"v18": base, "v19_best": safe_load_model(best_path), "v19_ema": safe_load_model(ema_path)}
+    pred = lambda m, I, F, U: m.predict([I / 255.0, F, U], batch_size=128, verbose=0)
+    cands = {"v18": base, "v19_best": v19_best}
     val_scores = {k: accuracy_score(y_va, pred(m, X_va_i, Xva_s, Uva).argmax(1)) for k, m in cands.items()}
     print("\n📋 Validation accuracy by candidate:", {k: f"{v*100:.2f}%" for k, v in val_scores.items()})
     chosen = max(val_scores, key=val_scores.get)

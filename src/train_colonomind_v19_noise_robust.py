@@ -194,6 +194,27 @@ class HybridDataGenerator(Sequence):
         if self.shuffle:
             np.random.shuffle(self.indices)
 
+class LiveStepLogger(tf.keras.callbacks.Callback):
+    def on_epoch_begin(self, epoch, logs=None):
+        self.t_epoch = time.time()
+        print(f"\n🏃 [Epoch {epoch+1:02d}/{self.params['epochs']}] Training started...", flush=True)
+
+    def on_train_batch_end(self, batch, logs=None):
+        steps = self.params.get('steps', 1)
+        if (batch + 1) % 25 == 0 or (batch + 1) == steps:
+            pct = ((batch + 1) / steps) * 100
+            loss = logs.get('loss', 0.0)
+            acc = logs.get('accuracy', 0.0) * 100
+            print(f"   ⚡ Batch {batch+1:03d}/{steps} ({pct:5.1f}%) | Loss: {loss:.4f} | Train Acc: {acc:.2f}%", flush=True)
+
+    def on_epoch_end(self, epoch, logs=None):
+        dur = time.time() - self.t_epoch
+        tr_acc = logs.get('accuracy', 0.0) * 100
+        val_acc = logs.get('val_accuracy', 0.0) * 100
+        loss = logs.get('loss', 0.0)
+        val_loss = logs.get('val_loss', 0.0)
+        print(f"🏁 [Epoch {epoch+1:02d} Complete in {dur:.1f}s] Loss: {loss:.4f} | Train Acc: {tr_acc:.2f}% | Val Loss: {val_loss:.4f} | Val Acc: {val_acc:.2f}%", flush=True)
+
 def run_active_feedback_loop(
     model, scaler, umap_mod,
     X_tr_i, X_tr_f, X_tr_u, y_tr,
@@ -371,27 +392,6 @@ def main():
 
     print(f"✅ 2D Manifold ready in 0.1s! (Shapes: Train={Utr.shape}, Val={Uva.shape}, Test={Ute.shape})", flush=True)
     umap_mod = None
-
-class LiveStepLogger(tf.keras.callbacks.Callback):
-    def on_epoch_begin(self, epoch, logs=None):
-        self.t_epoch = time.time()
-        print(f"\n🏃 [Epoch {epoch+1:02d}/{self.params['epochs']}] Training started...", flush=True)
-
-    def on_train_batch_end(self, batch, logs=None):
-        steps = self.params.get('steps', 1)
-        if (batch + 1) % 25 == 0 or (batch + 1) == steps:
-            pct = ((batch + 1) / steps) * 100
-            loss = logs.get('loss', 0.0)
-            acc = logs.get('accuracy', 0.0) * 100
-            print(f"   ⚡ Batch {batch+1:03d}/{steps} ({pct:5.1f}%) | Loss: {loss:.4f} | Train Acc: {acc:.2f}%", flush=True)
-
-    def on_epoch_end(self, epoch, logs=None):
-        dur = time.time() - self.t_epoch
-        tr_acc = logs.get('accuracy', 0.0) * 100
-        val_acc = logs.get('val_accuracy', 0.0) * 100
-        loss = logs.get('loss', 0.0)
-        val_loss = logs.get('val_loss', 0.0)
-        print(f"🏁 [Epoch {epoch+1:02d} Complete in {dur:.1f}s] Loss: {loss:.4f} | Train Acc: {tr_acc:.2f}% | Val Loss: {val_loss:.4f} | Val Acc: {val_acc:.2f}%", flush=True)
 
     base_path = os.path.join(args.base_dir, "colonomind_v18_modse2.h5")
     print(f"⚡ Building Mod-SE(2) Hybrid model safely and loading weights...", flush=True)

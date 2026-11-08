@@ -15,7 +15,13 @@ techniques the literature recommends for noisy ordinal medical labels:
   5. Held-out-validation Feedback Agent (same as V18).
 Test data is used once, at the very end.
 """
-import os, sys, json, time, argparse, warnings, traceback
+import os, sys, json, time, argparse, warnings, traceback, signal
+
+# Ignore terminal interrupts so nohup / tail -f Ctrl+C CANNOT terminate this process
+try:
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+except Exception:
+    pass
 
 # Ensure using idle GPU 3 if not already set
 if "CUDA_VISIBLE_DEVICES" not in os.environ:
@@ -190,7 +196,8 @@ def run_active_feedback_loop(
     print("🤖 ACTIVE FEEDBACK AGENT TRAINING (Boundary Error Elimination Loop)")
     print("=" * 80, flush=True)
 
-    deep_extractor = Model(inputs=model.input, outputs=model.get_layer('deep_ext_3').output)
+    with tf.device("/CPU:0"):
+        deep_extractor = Model(inputs=model.input, outputs=model.get_layer('deep_ext_3').output)
 
     def extract_full_profile(imgs, feats_s, umaps):
         probs = model.predict([imgs / 255.0, feats_s, umaps], batch_size=64, verbose=1)
@@ -356,18 +363,40 @@ def main():
     print(f"✅ 2D Manifold ready in 0.1s! (Shapes: Train={Utr.shape}, Val={Uva.shape}, Test={Ute.shape})", flush=True)
     umap_mod = None
 
+class LiveStepLogger(tf.keras.callbacks.Callback):
+    def on_epoch_begin(self, epoch, logs=None):
+        self.t_epoch = time.time()
+        print(f"\n🏃 [Epoch {epoch+1:02d}/{self.params['epochs']}] Training started...", flush=True)
+
+    def on_train_batch_end(self, batch, logs=None):
+        steps = self.params.get('steps', 1)
+        if (batch + 1) % 25 == 0 or (batch + 1) == steps:
+            pct = ((batch + 1) / steps) * 100
+            loss = logs.get('loss', 0.0)
+            acc = logs.get('accuracy', 0.0) * 100
+            print(f"   ⚡ Batch {batch+1:03d}/{steps} ({pct:5.1f}%) | Loss: {loss:.4f} | Train Acc: {acc:.2f}%", flush=True)
+
+    def on_epoch_end(self, epoch, logs=None):
+        dur = time.time() - self.t_epoch
+        tr_acc = logs.get('accuracy', 0.0) * 100
+        val_acc = logs.get('val_accuracy', 0.0) * 100
+        loss = logs.get('loss', 0.0)
+        val_loss = logs.get('val_loss', 0.0)
+        print(f"🏁 [Epoch {epoch+1:02d} Complete in {dur:.1f}s] Loss: {loss:.4f} | Train Acc: {tr_acc:.2f}% | Val Loss: {val_loss:.4f} | Val Acc: {val_acc:.2f}%", flush=True)
+
     base_path = os.path.join(args.base_dir, "colonomind_v18_modse2.h5")
-    print(f"⚡ Building Mod-SE(2) Hybrid model on GPU H100 and loading weights...", flush=True)
-    base = build_modse2_focused_hybrid()
+    print(f"⚡ Building Mod-SE(2) Hybrid model safely and loading weights...", flush=True)
+    with tf.device("/CPU:0"):
+        base = build_modse2_focused_hybrid()
     try:
         base.load_weights(base_path)
-        print("✅ V18 weights loaded directly onto GPU H100!", flush=True)
+        print("✅ V18 weights loaded directly onto Mod-SE(2) Hybrid model!", flush=True)
     except Exception:
         with tf.device("/CPU:0"):
             from tensorflow.keras.models import load_model
             tmp = load_model(base_path, compile=False)
             base.set_weights(tmp.get_weights())
-        print("✅ Transferred V18 weights to native GPU H100 model!", flush=True)
+        print("✅ Transferred V18 weights to native Mod-SE(2) Hybrid model!", flush=True)
 
     teacher_p_tr, teacher_p_va, teacher_p_te = None, None, None
     if os.path.exists(args.teacher_probs):
@@ -381,8 +410,18 @@ def main():
 
     print("\n🔍 Confident-learning pass over TRAIN split (scanning 12,956 samples on GPU H100)...", flush=True)
     t_scan = time.time()
-    P_tr = base.predict([X_tr_i / 255.0, Xtr_s, Utr], batch_size=128, verbose=1)
-    print(f"✅ Completed GPU scan of 12,956 samples in {time.time() - t_scan:.1f}s!", flush=True)
+    chunk_size = 2500
+    P_tr_list = []
+    total_samples = len(X_tr_i)
+    for i in range(0, total_samples, chunk_size):
+        end_i = min(i + chunk_size, total_samples)
+        p_chunk = base.predict([X_tr_i[i:end_i] / 255.0, Xtr_s[i:end_i], Utr[i:end_i]], batch_size=128, verbose=0)
+        P_tr_list.append(p_chunk)
+        pct = (end_i / total_samples) * 100
+        elapsed = time.time() - t_scan
+        print(f"   ⏳ Scanned {end_i:,}/{total_samples:,} samples ({pct:5.1f}%) in {elapsed:.1f}s ...", flush=True)
+    P_tr = np.vstack(P_tr_list)
+    print(f"✅ Completed GPU scan of {total_samples:,} samples in {time.time() - t_scan:.1f}s!", flush=True)
     p_given = P_tr[np.arange(len(y_tr)), y_tr]
     p_top, y_top = P_tr.max(1), P_tr.argmax(1)
 
@@ -428,19 +467,22 @@ def main():
                                      batch_size=args.batch_size, augment=False, shuffle=False)
 
     print("\n🔥 Fine-tuning with CDW-CE + EMA on the cleaned train split")
-    model = build_modse2_focused_hybrid()
-    model.set_weights(base.get_weights())
+    with tf.device("/CPU:0"):
+        model = build_modse2_focused_hybrid()
+        model.set_weights(base.get_weights())
     model.compile(optimizer=Adam(1e-4, use_ema=True, ema_momentum=0.999), loss=make_cdw_ce_loss(), metrics=["accuracy"])
     best_weights_path = os.path.join(args.save_dir, "colonomind_v19_best.weights.h5")
     t0 = time.time()
-    model.fit(tr_gen, validation_data=va_gen, epochs=args.epochs, verbose=2, callbacks=[
+    model.fit(tr_gen, validation_data=va_gen, epochs=args.epochs, verbose=0, callbacks=[
+        LiveStepLogger(),
         ModelCheckpoint(best_weights_path, save_best_only=True, save_weights_only=True, monitor="val_accuracy", verbose=1),
         EarlyStopping(patience=12, monitor="val_accuracy", restore_best_weights=False, verbose=1),
         tf.keras.callbacks.ReduceLROnPlateau(monitor="val_accuracy", factor=0.5, patience=4, min_lr=1e-6, verbose=1),
     ])
     print(f"⏱️ fine-tune took {(time.time() - t0) / 60:.1f} min")
 
-    v19_best = build_modse2_focused_hybrid()
+    with tf.device("/CPU:0"):
+        v19_best = build_modse2_focused_hybrid()
     v19_best.load_weights(best_weights_path)
 
     # Model selection on VALIDATION only

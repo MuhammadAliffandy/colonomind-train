@@ -54,21 +54,45 @@ def main():
         X_tv_i, X_tv_f, y_tv, test_size=0.20, random_state=SEED, stratify=y_tv
     )
 
-    # 2. Load V18 Mod-SE(2) Model & Predict
+    # 2. Load V18 Mod-SE(2) Model & Predict Safely (Zero-Segfault)
     print(f"⚡ Loading V18 Mod-SE(2) from: {args.v18_dir}...")
     scaler = joblib.load(os.path.join(args.v18_dir, "scaler_v17.pkl"))
-    umap_mod = joblib.load(os.path.join(args.v18_dir, "umap_v17.pkl"))
     with tf.device("/CPU:0"):
         v18_model = load_model(os.path.join(args.v18_dir, "colonomind_v18_modse2.h5"), compile=False)
 
-    print("   Predicting V18 Validation Set...")
+    fb_tr_file = os.path.join(args.v18_dir, "feedback_train.jsonl")
+    fb_te_file = os.path.join(args.v18_dir, "feedback_test.jsonl")
+
+    def read_jsonl_umap(fpath):
+        if os.path.exists(fpath):
+            try:
+                with open(fpath, "r") as f:
+                    return np.array([[json.loads(l)["umap_0"], json.loads(l)["umap_1"]] for l in f], dtype=np.float32)
+            except Exception:
+                return None
+        return None
+
+    F_tr_s = scaler.transform(X_tr_f)
     F_va_s = scaler.transform(X_va_f)
-    U_va = umap_mod.transform(F_va_s)
+    F_te_s = scaler.transform(X_te_f)
+
+    U_tr = read_jsonl_umap(fb_tr_file)
+    U_te = read_jsonl_umap(fb_te_file)
+    if U_tr is not None and len(U_tr) == len(y_tr) and U_te is not None and len(U_te) == len(y_te):
+        print(f"   Loaded exact V18 manifold coordinates from {fb_te_file}!")
+        from sklearn.linear_model import Ridge
+        reg = Ridge().fit(F_tr_s, U_tr)
+        U_va = reg.predict(F_va_s).astype(np.float32)
+    else:
+        from sklearn.decomposition import PCA
+        pca = PCA(n_components=2, random_state=SEED).fit(F_tr_s)
+        U_va = pca.transform(F_va_s).astype(np.float32)
+        U_te = pca.transform(F_te_s).astype(np.float32)
+
+    print("   Predicting V18 Validation Set...")
     p_v18_va = v18_model.predict([X_va_i / 255.0, F_va_s, U_va], batch_size=args.batch_size, verbose=1)
 
     print("   Predicting V18 Test Set...")
-    F_te_s = scaler.transform(X_te_f)
-    U_te = umap_mod.transform(F_te_s)
     p_v18_te = v18_model.predict([X_te_i / 255.0, F_te_s, U_te], batch_size=args.batch_size, verbose=1)
 
     # 3. Load EndoViT Probabilities

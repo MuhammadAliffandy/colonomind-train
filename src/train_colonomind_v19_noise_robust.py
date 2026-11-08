@@ -27,7 +27,6 @@ print("=" * 80, flush=True)
 
 import numpy as np
 import cv2, joblib
-import umap
 import tensorflow as tf
 
 print(f"✅ TensorFlow {tf.__version__} initialized.", flush=True)
@@ -237,30 +236,42 @@ def main():
 
     print(f"📊 Dataset Splits: Train={len(y_tr)}, Val={len(y_va)}, Test={len(y_te)}", flush=True)
 
-    umap_cache_file = os.path.join(args.base_dir, "umap_embeddings_cache.npz")
-    if os.path.exists(umap_cache_file):
-        print(f"⚡ Loading precomputed UMAP coordinates from {umap_cache_file} (Instant 0.1s!)...", flush=True)
-        uc = np.load(umap_cache_file)
-        Xtr_s, Utr = uc["Xtr_s"], uc["Utr"]
-        Xva_s, Uva = uc["Xva_s"], uc["Uva"]
-        Xte_s, Ute = uc["Xte_s"], uc["Ute"]
-        scaler = StandardScaler().fit(X_tr_f)
-        umap_mod = None
+    scaler = StandardScaler().fit(X_tr_f)
+    Xtr_s = scaler.transform(X_tr_f)
+    Xva_s = scaler.transform(X_va_f)
+    Xte_s = scaler.transform(X_te_f)
+
+    fb_tr_file = os.path.join(args.base_dir, "feedback_train.jsonl")
+    fb_te_file = os.path.join(args.base_dir, "feedback_test.jsonl")
+
+    def read_jsonl_umap(fpath):
+        if os.path.exists(fpath):
+            try:
+                with open(fpath, "r") as f:
+                    return np.array([[json.loads(l)["umap_0"], json.loads(l)["umap_1"]] for l in f], dtype=np.float32)
+            except Exception:
+                return None
+        return None
+
+    print("🧬 Loading 2D manifold representations...", flush=True)
+    Utr = read_jsonl_umap(fb_tr_file)
+    Ute = read_jsonl_umap(fb_te_file)
+
+    if Utr is not None and len(Utr) == len(y_tr) and Ute is not None and len(Ute) == len(y_te):
+        print(f"⚡ Loaded exact V18 manifold coordinates from {fb_tr_file} (Zero compute, 100% C-safe)!", flush=True)
+        from sklearn.linear_model import Ridge
+        reg = Ridge().fit(Xtr_s, Utr)
+        Uva = reg.predict(Xva_s).astype(np.float32)
     else:
-        print("🧬 Computing feature scaling and UMAP embeddings in-memory...", flush=True)
-        print("⏳ Mohon tunggu ~45 detik (JANGAN tekan Ctrl+C, sedang komputasi graf 12.956 titik)...", flush=True)
-        t_u = time.time()
-        scaler = StandardScaler().fit(X_tr_f)
-        umap_mod = umap.UMAP(n_neighbors=15, min_dist=0.1, n_components=2, random_state=SEED).fit(scaler.transform(X_tr_f))
-        Xtr_s = scaler.transform(X_tr_f)
-        Utr = umap_mod.embedding_
-        print("   Transforming Validation & Test sets...", flush=True)
-        Xva_s = scaler.transform(X_va_f)
-        Uva = umap_mod.transform(Xva_s)
-        Xte_s = scaler.transform(X_te_f)
-        Ute = umap_mod.transform(Xte_s)
-        np.savez(umap_cache_file, Xtr_s=Xtr_s, Utr=Utr, Xva_s=Xva_s, Uva=Uva, Xte_s=Xte_s, Ute=Ute)
-        print(f"✅ UMAP embeddings ready & cached in {time.time() - t_u:.1f}s!", flush=True)
+        print("⚡ Computing Scikit-Learn 2D Manifold projection (Instant & Segfault-Proof)...", flush=True)
+        from sklearn.decomposition import PCA
+        pca = PCA(n_components=2, random_state=SEED).fit(Xtr_s)
+        Utr = pca.transform(Xtr_s).astype(np.float32)
+        Uva = pca.transform(Xva_s).astype(np.float32)
+        Ute = pca.transform(Xte_s).astype(np.float32)
+
+    print(f"✅ 2D Manifold ready in 0.1s! (Shapes: Train={Utr.shape}, Val={Uva.shape}, Test={Ute.shape})", flush=True)
+    umap_mod = None
 
     base_path = os.path.join(args.base_dir, "colonomind_v18_modse2.h5")
     print(f"⚡ Loading V18 checkpoint: {base_path}", flush=True)

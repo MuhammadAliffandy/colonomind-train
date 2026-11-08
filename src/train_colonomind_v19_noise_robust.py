@@ -296,10 +296,18 @@ def main():
     else:
         print(f"ℹ️ Teacher probs not found at {args.teacher_probs}. Running pure self-cleaning.", flush=True)
 
-    pred = lambda m, I, F, U: m.predict([I / 255.0, F, U], batch_size=64, verbose=1)
-
-    print("\n🔍 Confident-learning pass over TRAIN split (scanning 12,956 samples with live progress bar)...", flush=True)
-    P_tr = pred(base, X_tr_i, Xtr_s, Utr)
+    print("\n🔍 Confident-learning pass over TRAIN split (scanning 12,956 samples)...", flush=True)
+    chunk_sz = 128
+    P_tr_list = []
+    tot = len(X_tr_i)
+    for s_idx in range(0, tot, chunk_sz):
+        e_idx = min(s_idx + chunk_sz, tot)
+        p_chunk = base.predict_on_batch([X_tr_i[s_idx:e_idx] / 255.0, Xtr_s[s_idx:e_idx], Utr[s_idx:e_idx]])
+        P_tr_list.append(p_chunk)
+        if (s_idx // chunk_sz) % 25 == 0 or e_idx == tot:
+            print(f"   📊 Progress: {e_idx:,} / {tot:,} images scanned ({e_idx/tot*100:.0f}%)...", flush=True)
+    P_tr = np.vstack(P_tr_list)
+    print("✅ Completed scan of 12,956 samples!", flush=True)
     p_given = P_tr[np.arange(len(y_tr)), y_tr]
     p_top, y_top = P_tr.max(1), P_tr.argmax(1)
 
@@ -349,7 +357,7 @@ def main():
     model.compile(optimizer=Adam(1e-4, use_ema=True, ema_momentum=0.999), loss=make_cdw_ce_loss(), metrics=["accuracy"])
     best_path = os.path.join(args.save_dir, "colonomind_v19_best.h5")
     t0 = time.time()
-    model.fit(tr_gen, validation_data=va_gen, epochs=args.epochs, verbose=1, callbacks=[
+    model.fit(tr_gen, validation_data=va_gen, epochs=args.epochs, verbose=2, callbacks=[
         ModelCheckpoint(best_path, save_best_only=True, monitor="val_accuracy", verbose=1),
         EarlyStopping(patience=12, monitor="val_accuracy", restore_best_weights=False, verbose=1),
         tf.keras.callbacks.ReduceLROnPlateau(monitor="val_accuracy", factor=0.5, patience=4, min_lr=1e-6, verbose=1),

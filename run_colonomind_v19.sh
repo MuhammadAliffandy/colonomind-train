@@ -34,10 +34,12 @@ nohup python -u src/train_colonomind_v19_noise_robust.py \
     --base_dir ../Result/ColonoMind_v18_Audit \
     --teacher_probs ../Result/ColonoMind_v19_teacher/teacher_probs_endovit.npz \
     --epochs 40 \
-    > "$LOG_FILE" 2>&1 &
+    < /dev/null > "$LOG_FILE" 2>&1 &
 
 PID=$!
+disown -h $PID
 echo "✅ Focused Pipeline successfully launched in background (PID: $PID)"
+echo "🔒 Process is immune to terminal closure, disconnects, and Ctrl+C!"
 echo ""
 echo "📊 How to monitor execution live:"
 echo "   tail -f $LOG_FILE"

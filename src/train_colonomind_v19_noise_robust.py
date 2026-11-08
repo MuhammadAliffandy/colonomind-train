@@ -31,18 +31,6 @@ import tensorflow as tf
 
 print(f"✅ TensorFlow {tf.__version__} initialized.", flush=True)
 
-# Enable GPU dynamic memory allocation to prevent instant crash
-gpus = tf.config.list_physical_devices('GPU')
-if gpus:
-    print(f"🎮 Found {len(gpus)} GPU(s): {[g.name for g in gpus]}", flush=True)
-    for gpu in gpus:
-        try:
-            tf.config.experimental.set_memory_growth(gpu, True)
-        except Exception as e:
-            print(f"⚠️ Memory growth notice: {e}", flush=True)
-else:
-    print("⚠️ No physical GPU detected by TensorFlow!", flush=True)
-
 from tensorflow.keras.models import Model, load_model
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping

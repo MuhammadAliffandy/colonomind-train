@@ -226,8 +226,7 @@ def run_active_feedback_loop(
     print("🤖 ACTIVE FEEDBACK AGENT TRAINING (Boundary Error Elimination Loop)")
     print("=" * 80, flush=True)
 
-    with tf.device("/CPU:0"):
-        deep_extractor = Model(inputs=model.input, outputs=model.get_layer('deep_ext_3').output)
+    deep_extractor = Model(inputs=model.input, outputs=model.get_layer('deep_ext_3').output)
 
     def extract_full_profile(imgs, feats_s, umaps):
         probs = model.predict([imgs / 255.0, feats_s, umaps], batch_size=64, verbose=1)
@@ -394,18 +393,18 @@ def main():
     umap_mod = None
 
     base_path = os.path.join(args.base_dir, "colonomind_v18_modse2.h5")
-    print(f"⚡ Building Mod-SE(2) Hybrid model safely and loading weights...", flush=True)
-    with tf.device("/CPU:0"):
-        base = build_modse2_focused_hybrid()
+    print(f"⚡ Building Mod-SE(2) Hybrid model on GPU H100 and loading weights...", flush=True)
+    base = build_modse2_focused_hybrid()
     try:
         base.load_weights(base_path)
-        print("✅ V18 weights loaded directly onto Mod-SE(2) Hybrid model!", flush=True)
+        print("✅ V18 weights loaded directly onto GPU Mod-SE(2) Hybrid model!", flush=True)
     except Exception:
         with tf.device("/CPU:0"):
             from tensorflow.keras.models import load_model
             tmp = load_model(base_path, compile=False)
-            base.set_weights(tmp.get_weights())
-        print("✅ Transferred V18 weights to native Mod-SE(2) Hybrid model!", flush=True)
+            weights = tmp.get_weights()
+        base.set_weights(weights)
+        print("✅ Transferred V18 weights to native GPU Mod-SE(2) Hybrid model!", flush=True)
 
     teacher_p_tr, teacher_p_va, teacher_p_te = None, None, None
     if os.path.exists(args.teacher_probs):
@@ -476,9 +475,8 @@ def main():
                                      batch_size=args.batch_size, augment=False, shuffle=False)
 
     print("\n🔥 Fine-tuning with CDW-CE + EMA on the cleaned train split")
-    with tf.device("/CPU:0"):
-        model = build_modse2_focused_hybrid()
-        model.set_weights(base.get_weights())
+    model = build_modse2_focused_hybrid()
+    model.set_weights(base.get_weights())
     model.compile(optimizer=Adam(1e-4, use_ema=True, ema_momentum=0.999), loss=make_cdw_ce_loss(), metrics=["accuracy"])
     best_weights_path = os.path.join(args.save_dir, "colonomind_v19_best.weights.h5")
     t0 = time.time()
@@ -490,8 +488,7 @@ def main():
     ])
     print(f"⏱️ fine-tune took {(time.time() - t0) / 60:.1f} min")
 
-    with tf.device("/CPU:0"):
-        v19_best = build_modse2_focused_hybrid()
+    v19_best = build_modse2_focused_hybrid()
     v19_best.load_weights(best_weights_path)
 
     # Model selection on VALIDATION only

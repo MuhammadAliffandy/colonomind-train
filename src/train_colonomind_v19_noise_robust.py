@@ -15,10 +15,20 @@ techniques the literature recommends for noisy ordinal medical labels:
   5. Held-out-validation Feedback Agent (same as V18).
 Test data is used once, at the very end.
 """
-import os, sys, json, time, argparse, importlib.util, warnings
+import os, sys, json, time, argparse, warnings
 import numpy as np
 import cv2, joblib
 import tensorflow as tf
+
+# Enable GPU dynamic memory allocation to prevent instant crash
+gpus = tf.config.list_physical_devices('GPU')
+if gpus:
+    for gpu in gpus:
+        try:
+            tf.config.experimental.set_memory_growth(gpu, True)
+        except Exception:
+            pass
+
 from tensorflow.keras.models import load_model
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping
@@ -30,9 +40,8 @@ from sklearn.metrics import accuracy_score, confusion_matrix, f1_score, cohen_ka
 warnings.filterwarnings("ignore")
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-spec = importlib.util.spec_from_file_location("v18", os.path.join(HERE, "train_colonomind_v18_audit_ordinal.py"))
-v18 = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(v18)
+sys.path.insert(0, HERE)
+import train_colonomind_v18_audit_ordinal as v18
 
 NUM_CLASSES, SEED = v18.NUM_CLASSES, v18.SEED
 

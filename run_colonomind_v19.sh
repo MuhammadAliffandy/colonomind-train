@@ -12,7 +12,7 @@
 # ==============================================================================
 
 export TF_CPP_MIN_LOG_LEVEL=2
-export CUDA_VISIBLE_DEVICES=0
+export CUDA_VISIBLE_DEVICES=3
 
 SAVE_DIR="../Result/ColonoMind_v19_NoiseRobust"
 LOG_FILE="colonomind_v19.log"

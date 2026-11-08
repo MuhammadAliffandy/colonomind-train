@@ -17,6 +17,15 @@ import cv2
 import joblib
 
 import tensorflow as tf
+
+gpus = tf.config.list_physical_devices('GPU')
+if gpus:
+    for gpu in gpus:
+        try:
+            tf.config.experimental.set_memory_growth(gpu, True)
+        except Exception:
+            pass
+
 from tensorflow.keras.models import load_model
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
@@ -138,3 +147,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

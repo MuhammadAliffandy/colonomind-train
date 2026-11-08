@@ -21,15 +21,19 @@ echo "======================================================================"
 echo "🚀 LAUNCHING COLONOMIND v19 FOCUSED — SINGLE-RUN MOD-SE(2) + FEEDBACK"
 echo "======================================================================"
 echo "Mode         : Single Focused Model Run (No 5-seed delays)"
-echo "Architecture : 3-Branch Mod-SE(2) + 3-Layer Deep Extraction Fusion"
+echo "Architecture : 3-Branch Mod-SE(2) + Knowledge Distillation (EndoViT Teacher)"
+echo "Distillation : Soft Teacher Targets from 700k-image Foundation Model"
 echo "Feedback     : Active Error Injection Loop (LightGBM feedback_agent.txt)"
-echo "Epochs       : 80 Epochs (Warmup + Cosine Annealing LR)"
+echo "Epochs       : 40 Epochs (CDW-CE Loss + Optimizer EMA)"
 echo "Save Root    : $SAVE_DIR"
 echo "Log File     : $LOG_FILE"
 echo "======================================================================"
 
 nohup python -u src/train_colonomind_v19_noise_robust.py \
-    --save_dir "$SAVE_DIR" --base_dir ../Result/ColonoMind_v18_Audit --epochs 40 \
+    --save_dir "$SAVE_DIR" \
+    --base_dir ../Result/ColonoMind_v18_Audit \
+    --teacher_probs ../Result/ColonoMind_v19_teacher/teacher_probs_endovit.npz \
+    --epochs 40 \
     > "$LOG_FILE" 2>&1 &
 
 PID=$!

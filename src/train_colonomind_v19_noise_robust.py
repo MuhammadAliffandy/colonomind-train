@@ -78,6 +78,8 @@ def main():
     p.add_argument("--batch_size", type=int, default=16)
     p.add_argument("--noise_conf", type=float, default=0.75, help="min confidence of the contradicting prediction")
     p.add_argument("--noise_max_frac", type=float, default=0.15, help="cap on removed training fraction")
+    p.add_argument("--teacher_probs", default="../Result/ColonoMind_v19_teacher/teacher_probs_endovit.npz", help="Path to EndoViT teacher probabilities")
+    p.add_argument("--kd_weight", type=float, default=0.35, help="Knowledge distillation weight from EndoViT")
     args = p.parse_args()
     os.makedirs(args.save_dir, exist_ok=True)
 
@@ -109,13 +111,34 @@ def main():
     print(f"⚡ Loading V18 checkpoint: {base_path}", flush=True)
     base = load_model(base_path, compile=False)
 
+    teacher_p_tr, teacher_p_va, teacher_p_te = None, None, None
+    if os.path.exists(args.teacher_probs):
+        print(f"🧠 Loading EndoViT Foundation Teacher from: {args.teacher_probs}", flush=True)
+        td = np.load(args.teacher_probs)
+        teacher_p_tr, teacher_p_va, teacher_p_te = td["p_tr"], td["p_va"], td["p_te"]
+        acc_teacher_va = accuracy_score(y_va, teacher_p_va.argmax(1))
+        print(f"   EndoViT teacher validation accuracy: {acc_teacher_va * 100:.2f}%", flush=True)
+    else:
+        print(f"ℹ️ Teacher probs not found at {args.teacher_probs}. Running pure self-cleaning.", flush=True)
+
     pred = lambda m, I, F, U: m.predict([I / 255.0, F, U], batch_size=args.batch_size, verbose=0)
 
     print("\n🔍 Confident-learning pass over TRAIN split (scanning 12,956 samples)...", flush=True)
     P_tr = pred(base, X_tr_i, Xtr_s, Utr)
     p_given = P_tr[np.arange(len(y_tr)), y_tr]
     p_top, y_top = P_tr.max(1), P_tr.argmax(1)
-    flagged = (y_top != y_tr) & (p_top >= args.noise_conf) & (p_given < 0.15)
+
+    if teacher_p_tr is not None:
+        # Dual-Model Consensus Cleaning: flag samples where BOTH V18 and EndoViT disagree with label
+        p_top_teacher = teacher_p_tr.max(1)
+        y_top_teacher = teacher_p_tr.argmax(1)
+        both_disagree = (y_top != y_tr) & (y_top_teacher != y_tr) & (y_top == y_top_teacher)
+        v18_strong_flag = (y_top != y_tr) & (p_top >= args.noise_conf) & (p_given < 0.15)
+        flagged = both_disagree | v18_strong_flag
+        print(f"   Dual-consensus flagged: {both_disagree.sum()} samples where V18 & EndoViT BOTH agree label is wrong!", flush=True)
+    else:
+        flagged = (y_top != y_tr) & (p_top >= args.noise_conf) & (p_given < 0.15)
+
     order = np.argsort(p_given)
     cap = int(args.noise_max_frac * len(y_tr))
     keep = np.ones(len(y_tr), bool)
@@ -131,7 +154,18 @@ def main():
               open(os.path.join(args.save_dir, "removed_train_samples.json"), "w"))
 
     Xi, Xf, Xu, yk = X_tr_i[keep], Xtr_s[keep], Utr[keep], y_tr[keep]
-    tr_gen = v18.HybridDataGenerator(Xi, Xf, Xu, ordinal_soft_labels(yk), batch_size=args.batch_size, augment=True)
+
+    # Target calculation: Knowledge Distillation from EndoViT + Ordinal Soft Labels
+    soft_targets = ordinal_soft_labels(yk)
+    if teacher_p_tr is not None:
+        t_tr_kept = teacher_p_tr[keep]
+        train_targets = (1.0 - args.kd_weight) * soft_targets + args.kd_weight * t_tr_kept
+        train_targets = train_targets / train_targets.sum(axis=1, keepdims=True)
+        print(f"🎓 Applied Knowledge Distillation: {1.0 - args.kd_weight:.2f} * Ordinal + {args.kd_weight:.2f} * EndoViT Teacher", flush=True)
+    else:
+        train_targets = soft_targets
+
+    tr_gen = v18.HybridDataGenerator(Xi, Xf, Xu, train_targets, batch_size=args.batch_size, augment=True)
     va_gen = v18.HybridDataGenerator(X_va_i, Xva_s, Uva, to_categorical(y_va, NUM_CLASSES),
                                      batch_size=args.batch_size, augment=False, shuffle=False)
 
@@ -165,11 +199,29 @@ def main():
     print("\n" + "=" * 80 + "\n🏆 FINAL TEST EVALUATION (test split untouched until now)\n" + "=" * 80)
     evaluate("CNN only      ", y_te, cnn_preds)
     evaluate("CNN + Agent   ", y_te, final_preds)
-    print("\nConfusion matrix (CNN + Agent):\n", confusion_matrix(y_te, final_preds))
-    print(classification_report(y_te, final_preds, target_names=[f"MES{i}" for i in range(4)], digits=4))
+
+    blend_te = None
+    if teacher_p_va is not None and teacher_p_te is not None:
+        p_final_te = pred(final_model, X_te_i, Xte_s, Ute)
+        p_final_va = pred(final_model, X_va_i, Xva_s, Uva)
+        best_w, best_va = 0.5, 0.0
+        for w in np.linspace(0.1, 0.9, 81):
+            score = accuracy_score(y_va, (w * p_final_va + (1.0 - w) * teacher_p_va).argmax(1))
+            if score > best_va:
+                best_va, best_w = score, w
+        p_blend_te = best_w * p_final_te + (1.0 - best_w) * teacher_p_te
+        blend_te = p_blend_te.argmax(1)
+        print(f"\n🔮 Foundation Blend (Mod-SE2 {best_w:.2f} + EndoViT {1.0-best_w:.2f}):")
+        evaluate("Mod-SE2 + EndoViT", y_te, blend_te)
+
+    final_eval_preds = blend_te if blend_te is not None else final_preds
+    print("\nConfusion matrix:\n", confusion_matrix(y_te, final_eval_preds))
+    print(classification_report(y_te, final_eval_preds, target_names=[f"MES{i}" for i in range(4)], digits=4))
     json.dump({"chosen": chosen, "val_scores": val_scores,
-               "test_exact": float(accuracy_score(y_te, final_preds)),
-               "test_qwk": float(cohen_kappa_score(y_te, final_preds, weights="quadratic"))},
+               "test_exact": float(accuracy_score(y_te, final_eval_preds)),
+               "test_qwk": float(cohen_kappa_score(y_te, final_eval_preds, weights="quadratic")),
+               "test_remission": float(accuracy_score(y_te >= 2, final_eval_preds >= 2)),
+               "test_1off": float(np.mean(np.abs(y_te - final_eval_preds) <= 1))},
               open(os.path.join(args.save_dir, "v19_evaluation.json"), "w"), indent=2)
     print("✅ COLONOMIND v19 COMPLETED")
 

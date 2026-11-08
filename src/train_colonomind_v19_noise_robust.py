@@ -26,7 +26,7 @@ print(f"⏰ Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}", flush=True)
 print("=" * 80, flush=True)
 
 import numpy as np
-import cv2, joblib
+import cv2, joblib, umap
 import tensorflow as tf
 
 print(f"✅ TensorFlow {tf.__version__} initialized.", flush=True)
@@ -247,19 +247,17 @@ def main():
         X_tv_i, X_tv_f, y_tv, test_size=0.20, random_state=SEED, stratify=y_tv)
 
     print(f"📊 Dataset Splits: Train={len(y_tr)}, Val={len(y_va)}, Test={len(y_te)}", flush=True)
-    print("🧬 Loading feature scaler and UMAP models...", flush=True)
-    scaler = joblib.load(os.path.join(args.base_dir, "scaler_v17.pkl"))
-    umap_mod = joblib.load(os.path.join(args.base_dir, "umap_v17.pkl"))
-    proc = lambda f: (scaler.transform(f), umap_mod.transform(scaler.transform(f)))
-
-    print("🧬 Transforming UMAP for Validation (3,240)...", flush=True)
-    Xva_s, Uva = proc(X_va_f)
-    print("🧬 Transforming UMAP for Test (4,049)...", flush=True)
-    Xte_s, Ute = proc(X_te_f)
-    print("🧬 Transforming UMAP for Train (12,956)...", flush=True)
+    print("🧬 Computing feature scaling and UMAP embeddings (fast in-memory, ~35s)...", flush=True)
     t_u = time.time()
-    Xtr_s, Utr = proc(X_tr_f)
-    print(f"✅ UMAP transformation completed in {time.time() - t_u:.1f}s!", flush=True)
+    scaler = StandardScaler().fit(X_tr_f)
+    umap_mod = umap.UMAP(n_neighbors=15, min_dist=0.1, n_components=2, random_state=SEED).fit(scaler.transform(X_tr_f))
+    Xtr_s = scaler.transform(X_tr_f)
+    Utr = umap_mod.embedding_
+    Xva_s = scaler.transform(X_va_f)
+    Uva = umap_mod.transform(Xva_s)
+    Xte_s = scaler.transform(X_te_f)
+    Ute = umap_mod.transform(Xte_s)
+    print(f"✅ UMAP embeddings ready in {time.time() - t_u:.1f}s!", flush=True)
 
     base_path = os.path.join(args.base_dir, "colonomind_v18_modse2.h5")
     print(f"⚡ Loading V18 checkpoint: {base_path}", flush=True)

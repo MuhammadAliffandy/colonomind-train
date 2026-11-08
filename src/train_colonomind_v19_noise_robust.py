@@ -17,6 +17,10 @@ Test data is used once, at the very end.
 """
 import os, sys, json, time, argparse, warnings, traceback
 
+# Ensure using idle GPU 3 if not already set
+if "CUDA_VISIBLE_DEVICES" not in os.environ:
+    os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+
 # Force immediate unbuffered flushing to log file
 sys.stdout.reconfigure(line_buffering=True)
 sys.stderr.reconfigure(line_buffering=True)
@@ -273,9 +277,14 @@ def main():
     print(f"✅ 2D Manifold ready in 0.1s! (Shapes: Train={Utr.shape}, Val={Uva.shape}, Test={Ute.shape})", flush=True)
     umap_mod = None
 
+    def safe_load_model(filepath):
+        with tf.device("/CPU:0"):
+            return load_model(filepath, compile=False)
+
     base_path = os.path.join(args.base_dir, "colonomind_v18_modse2.h5")
-    print(f"⚡ Loading V18 checkpoint: {base_path}", flush=True)
-    base = load_model(base_path, compile=False)
+    print(f"⚡ Loading V18 checkpoint safely on CPU: {base_path}", flush=True)
+    base = safe_load_model(base_path)
+    print("✅ V18 model successfully deserialized!", flush=True)
 
     teacher_p_tr, teacher_p_va, teacher_p_te = None, None, None
     if os.path.exists(args.teacher_probs):
@@ -336,7 +345,7 @@ def main():
                                      batch_size=args.batch_size, augment=False, shuffle=False)
 
     print("\n🔥 Fine-tuning with CDW-CE + EMA on the cleaned train split")
-    model = load_model(base_path, compile=False)
+    model = safe_load_model(base_path)
     model.compile(optimizer=Adam(1e-4, use_ema=True, ema_momentum=0.999), loss=make_cdw_ce_loss(), metrics=["accuracy"])
     best_path = os.path.join(args.save_dir, "colonomind_v19_best.h5")
     t0 = time.time()
@@ -350,7 +359,7 @@ def main():
     model.save(ema_path)
 
     # Model selection on VALIDATION only
-    cands = {"v18": base, "v19_best": load_model(best_path, compile=False), "v19_ema": load_model(ema_path, compile=False)}
+    cands = {"v18": base, "v19_best": safe_load_model(best_path), "v19_ema": safe_load_model(ema_path)}
     val_scores = {k: accuracy_score(y_va, pred(m, X_va_i, Xva_s, Uva).argmax(1)) for k, m in cands.items()}
     print("\n📋 Validation accuracy by candidate:", {k: f"{v*100:.2f}%" for k, v in val_scores.items()})
     chosen = max(val_scores, key=val_scores.get)

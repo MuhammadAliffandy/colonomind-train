@@ -58,7 +58,8 @@ def main():
     print(f"⚡ Loading V18 Mod-SE(2) from: {args.v18_dir}...")
     scaler = joblib.load(os.path.join(args.v18_dir, "scaler_v17.pkl"))
     umap_mod = joblib.load(os.path.join(args.v18_dir, "umap_v17.pkl"))
-    v18_model = load_model(os.path.join(args.v18_dir, "colonomind_v18_modse2.h5"), compile=False)
+    with tf.device("/CPU:0"):
+        v18_model = load_model(os.path.join(args.v18_dir, "colonomind_v18_modse2.h5"), compile=False)
 
     print("   Predicting V18 Validation Set...")
     F_va_s = scaler.transform(X_va_f)

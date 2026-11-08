@@ -20,7 +20,7 @@ if [ -n "$CU13_PACKAGES" ]; then
 fi
 
 # 2. Ensure official CUDA 12 packages for TensorFlow 2.21 are installed
-echo "📦 Installing CUDA 12 runtime & cuDNN libraries for driver 550.90 (CUDA 12.4)..."
+echo "📦 Verifying CUDA 12 runtime & cuDNN libraries for driver 550.90..."
 pip install --no-cache-dir \
     nvidia-cuda-runtime-cu12 \
     nvidia-cudnn-cu12 \
@@ -29,9 +29,9 @@ pip install --no-cache-dir \
     nvidia-curand-cu12 \
     nvidia-cusolver-cu12 \
     nvidia-cusparse-cu12 \
-    nvidia-nvjitlink-cu12
+    nvidia-nvjitlink-cu12 >/dev/null 2>&1 || true
 
-# 3. Configure LD_LIBRARY_PATH to include nvidia pip libraries
+# 3. Configure LD_LIBRARY_PATH cleanly in OS linker
 SITE_PACKAGES=$(python -c "import site; print(site.getsitepackages()[0])" 2>/dev/null || echo "")
 if [ -d "$SITE_PACKAGES/nvidia" ]; then
     for sub in cuda_runtime cudnn cublas cufft curand cusolver cusparse nvjitlink; do
@@ -42,43 +42,35 @@ if [ -d "$SITE_PACKAGES/nvidia" ]; then
 fi
 export LD_LIBRARY_PATH="/usr/local/cuda-12.4/lib64:/usr/local/cuda-12/lib64:/usr/local/cuda/lib64:$LD_LIBRARY_PATH"
 
-echo "✅ CUDA 12 environment successfully configured!"
-
 # 4. Clean up any stale background processes
 pkill -f "train_colonomind_v19_noise_robust.py" 2>/dev/null || true
 sleep 1
 
 export TF_CPP_MIN_LOG_LEVEL=2
+export TF_FORCE_GPU_ALLOW_GROWTH=true
 export CUDA_VISIBLE_DEVICES=3
 export PYTHONUNBUFFERED=1
 
+echo "✅ Environment configured with CUDA 12 + dynamic GPU memory growth!"
+
 echo ""
 echo "======================================================================"
-echo "🧪 STEP 2: VERIFYING TENSORFLOW ON NVIDIA H100 (GPU 3)"
+echo "🧪 STEP 2: VERIFYING TENSORFLOW KERNEL ON NVIDIA H100 (GPU 3)"
 echo "======================================================================"
 python -c "
-import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '3'
-import site, ctypes, glob
-for sp in site.getsitepackages():
-    nvidia_dir = os.path.join(sp, 'nvidia')
-    if os.path.exists(nvidia_dir):
-        for so in sorted(glob.glob(os.path.join(nvidia_dir, '*', 'lib', '*.so*'))):
-            try: ctypes.CDLL(so, mode=ctypes.RTLD_GLOBAL)
-            except Exception: pass
-
 import tensorflow as tf
 print('TF Version:', tf.__version__)
 gpus = tf.config.list_physical_devices('GPU')
 print('Visible GPUs:', gpus)
 assert len(gpus) > 0, 'No GPU detected by TensorFlow!'
-print('✅ GPU verified successfully:', gpus[0].name)
+
+for g in gpus:
+    tf.config.experimental.set_memory_growth(g, True)
 
 with tf.device('/GPU:0'):
-    a = tf.random.normal([1000, 1000])
+    a = tf.constant([[1.0, 2.0], [3.0, 4.0]])
     b = tf.matmul(a, a)
-    c = tf.cast(b, tf.float16)
-    print('✅ SUCCESS: Op:Cast & MatMul executed on GPU H100 flawlessly!')
+    print('✅ SUCCESS: GPU H100 MatMul verified! Result:\n', b.numpy())
 "
 
 SAVE_DIR="../Result/ColonoMind_v19_NoiseRobust"

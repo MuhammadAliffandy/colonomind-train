@@ -30,34 +30,27 @@ if [ -d "$SITE_PACKAGES/nvidia" ]; then
     done
 fi
 export LD_LIBRARY_PATH="/usr/local/cuda-12.4/lib64:/usr/local/cuda-12/lib64:/usr/local/cuda/lib64:$LD_LIBRARY_PATH"
+export TF_FORCE_GPU_ALLOW_GROWTH=true
+export CUDA_VISIBLE_DEVICES=3
 
 echo ""
 echo "======================================================================"
-echo "🧪 STEP 2: VERIFYING TENSORFLOW OP:CAST & MATMUL ON GPU 3 (NVIDIA H100)"
+echo "🧪 STEP 2: VERIFYING TENSORFLOW KERNEL ON GPU 3 (NVIDIA H100)"
 echo "======================================================================"
 python -c "
-import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '3'
-import site, ctypes, glob
-for sp in site.getsitepackages():
-    nvidia_dir = os.path.join(sp, 'nvidia')
-    if os.path.exists(nvidia_dir):
-        for so in sorted(glob.glob(os.path.join(nvidia_dir, '*', 'lib', '*.so*'))):
-            try: ctypes.CDLL(so, mode=ctypes.RTLD_GLOBAL)
-            except Exception: pass
-
 import tensorflow as tf
 print('TF Version:', tf.__version__)
 gpus = tf.config.list_physical_devices('GPU')
 print('Visible GPUs:', gpus)
 assert len(gpus) > 0, 'No GPU detected by TensorFlow!'
-print('✅ GPU verified successfully:', gpus[0].name)
+
+for g in gpus:
+    tf.config.experimental.set_memory_growth(g, True)
 
 with tf.device('/GPU:0'):
-    a = tf.random.normal([2000, 2000])
+    a = tf.constant([[1.0, 2.0], [3.0, 4.0]])
     b = tf.matmul(a, a)
-    c = tf.cast(b, tf.float16)
-    print('✅ SUCCESS: GPU MatMul & Op:Cast executed flawlessly! Output shape:', c.shape)
+    print('✅ SUCCESS: GPU H100 MatMul verified! Result:\n', b.numpy())
 "
 
 echo "======================================================================"

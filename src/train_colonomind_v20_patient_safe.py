@@ -256,14 +256,26 @@ def main():
     parser.add_argument("--npz", default="../Result/ColonoMind_v6/dataset_cache_v6.npz")
     parser.add_argument("--manifest", default="Result/ColonoMind_V20_DataAudit/v20_patient_safe_splits.csv")
     parser.add_argument("--output-dir", default="Result/ColonoMind_V20_PatientSafe")
-    parser.add_argument("--epochs", type=int, default=80)
+    parser.add_argument("--epochs", type=int, default=120)
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--early-stopping-patience", type=int, default=25,
+        help="Validation epochs without improvement allowed before stopping.",
+    )
+    parser.add_argument(
+        "--minimum-epochs", type=int, default=40,
+        help="Do not let early stopping monitor validation before this epoch.",
+    )
     parser.add_argument(
         "--augment", action="store_true",
         help="Enable image-only augmentation for a separate ablation run.",
     )
     args = parser.parse_args()
+    if args.minimum_epochs < 0 or args.minimum_epochs >= args.epochs:
+        parser.error("--minimum-epochs must be >= 0 and less than --epochs")
+    if args.early_stopping_patience < 1:
+        parser.error("--early-stopping-patience must be at least 1")
 
     os.environ["PYTHONHASHSEED"] = str(args.seed)
     np.random.seed(args.seed)
@@ -337,11 +349,22 @@ def main():
         EpochLogger(),
         CSVLogger(history_path),
         ModelCheckpoint(weights_path, monitor="val_accuracy", mode="max", save_best_only=True, save_weights_only=True),
-        EarlyStopping(monitor="val_accuracy", mode="max", patience=12, restore_best_weights=True),
+        EarlyStopping(
+            monitor="val_accuracy",
+            mode="max",
+            patience=args.early_stopping_patience,
+            start_from_epoch=args.minimum_epochs,
+            restore_best_weights=True,
+        ),
         ReduceLROnPlateau(monitor="val_accuracy", mode="max", factor=0.5, patience=4, min_lr=1e-6),
     ]
 
-    print("Training Mod-SE(2) from scratch; test split is held out until final evaluation.", flush=True)
+    print(
+        "Training Mod-SE(2) from scratch; "
+        f"max_epochs={args.epochs}, early_stopping_start={args.minimum_epochs}, "
+        f"patience={args.early_stopping_patience}; test split held out until final evaluation.",
+        flush=True,
+    )
     started = time.time()
     model.fit(
         train_sequence,

@@ -287,6 +287,10 @@ def main():
     parser.add_argument("--epochs", type=int, default=80)
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--augment", action="store_true",
+        help="Enable image-only augmentation for a separate ablation run.",
+    )
     args = parser.parse_args()
 
     os.environ["PYTHONHASHSEED"] = str(args.seed)
@@ -344,7 +348,7 @@ def main():
     all_train_targets[train_idx] = train_targets
     train_sequence = HybridSequence(
         images, features, manifold, all_train_targets,
-        train_idx, args.batch_size, augment=True, shuffle=True,
+        train_idx, args.batch_size, augment=args.augment, shuffle=True,
     )
     val_sequence = HybridSequence(
         images, features, manifold, hard_targets, val_idx, args.batch_size, shuffle=False

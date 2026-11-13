@@ -1,0 +1,5 @@
+# DGX V20 training environment.
+# TensorFlow 2.17's tested Linux GPU build uses CUDA 12.3 and cuDNN 8.9,
+# compatible with the DGX driver's CUDA 12.4 capability shown in prior logs.
+-r requirements.txt
+tensorflow[and-cuda]==2.17.1

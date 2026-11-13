@@ -161,6 +161,20 @@ def make_cdw_ce_loss(alpha=2.0, mix=0.5):
     return loss
 
 
+def make_balanced_ce_loss(labels):
+    counts = np.bincount(labels, minlength=NUM_CLASSES).astype(np.float32)
+    weights = np.sqrt(counts.max() / counts)
+    weights /= np.average(weights, weights=counts)
+    print("Balanced CE class weights:", dict(zip(CLASS_NAMES, weights.tolist())), flush=True)
+    class_weights = tf.constant(weights, dtype=tf.float32)
+
+    def loss(y_true, y_pred):
+        y_pred = tf.clip_by_value(y_pred, 1e-7, 1.0)
+        return tf.reduce_mean(-tf.reduce_sum(y_true * tf.math.log(y_pred) * class_weights, axis=-1))
+
+    return loss
+
+
 def augment_image(image):
     rows, cols = image.shape[:2]
     angle = np.random.uniform(-30, 30)
@@ -251,6 +265,39 @@ def metric_bundle(y_true, y_pred):
     }
 
 
+class ValidationMetrics(tf.keras.callbacks.Callback):
+    def __init__(self, sequence, labels, indices, cohorts):
+        super().__init__()
+        self.sequence = sequence
+        self.labels = labels[indices]
+        self.cohorts = cohorts[indices]
+
+    def evaluate(self):
+        probabilities = self.model.predict(self.sequence, verbose=0)
+        predictions = probabilities.argmax(axis=1)
+        overall = metric_bundle(self.labels, predictions)
+        by_cohort = {}
+        for cohort in sorted(set(self.cohorts)):
+            mask = self.cohorts == cohort
+            by_cohort[cohort] = metric_bundle(self.labels[mask], predictions[mask])
+        return overall, by_cohort, probabilities
+
+    def on_epoch_end(self, epoch, logs=None):
+        overall, by_cohort, _ = self.evaluate()
+        logs["val_macro_f1"] = overall["macro_f1"]
+        logs["val_selection_score"] = 0.7 * overall["exact_accuracy"] + 0.3 * overall["macro_f1"]
+        cohort_summary = ", ".join(
+            f"{cohort}={metrics['exact_accuracy']:.3f}/{metrics['macro_f1']:.3f}"
+            for cohort, metrics in by_cohort.items()
+        )
+        print(
+            f"Validation epoch {epoch + 1}: exact={overall['exact_accuracy']:.4f}, "
+            f"macro_f1={overall['macro_f1']:.4f}, "
+            f"selection={logs['val_selection_score']:.4f}; "
+            f"cohort exact/macro_f1: {cohort_summary}", flush=True,
+        )
+
+
 def main():
     parser = argparse.ArgumentParser(description="Patient-aware V20 Mod-SE(2) training")
     parser.add_argument("--npz", default="../Result/ColonoMind_v6/dataset_cache_v6.npz")
@@ -259,6 +306,8 @@ def main():
     parser.add_argument("--epochs", type=int, default=120)
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--loss-mode", choices=("ordinal", "hard_ce", "balanced_ce"), default="ordinal")
+    parser.add_argument("--development-only", action="store_true", help="Save validation metrics; do not evaluate test")
     parser.add_argument(
         "--early-stopping-patience", type=int, default=25,
         help="Validation epochs without improvement allowed before stopping.",
@@ -282,7 +331,7 @@ def main():
     tf.keras.utils.set_random_seed(args.seed)
     os.makedirs(args.output_dir, exist_ok=True)
 
-    print("Loading V6 cache and V20 split manifest...", flush=True)
+    print("Loading V6 cache and split manifest...", flush=True)
     with np.load(args.npz, allow_pickle=True) as data:
         images = data["imgs"]
         raw_features = data["feats"].astype(np.float32)
@@ -314,7 +363,10 @@ def main():
         raise ValueError("Train, validation, and test splits must all be nonempty")
 
     print("Split sizes:", {"train": len(train_idx), "validation": len(val_idx), "test": len(test_idx)}, flush=True)
-    for name, indices in (("train", train_idx), ("validation", val_idx), ("test", test_idx)):
+    displayed_splits = (("train", train_idx), ("validation", val_idx))
+    if not args.development_only:
+        displayed_splits += (("test", test_idx),)
+    for name, indices in displayed_splits:
         print(f"{name} label counts:", dict(zip(CLASS_NAMES, np.bincount(y[indices], minlength=4))), flush=True)
 
     scaler = StandardScaler().fit(raw_features[train_idx])
@@ -325,7 +377,7 @@ def main():
     joblib.dump(scaler, os.path.join(args.output_dir, "feature_scaler.pkl"))
     joblib.dump(pca, os.path.join(args.output_dir, "feature_pca.pkl"))
 
-    train_targets = ordinal_soft_labels(y[train_idx])
+    train_targets = ordinal_soft_labels(y[train_idx]) if args.loss_mode == "ordinal" else to_categorical(y[train_idx], NUM_CLASSES).astype(np.float32)
     hard_targets = to_categorical(y, NUM_CLASSES).astype(np.float32)
     all_train_targets = hard_targets.copy()
     all_train_targets[train_idx] = train_targets
@@ -337,32 +389,43 @@ def main():
         images, features, manifold, hard_targets, val_idx, args.batch_size, shuffle=False
     )
 
+    loss = (
+        make_cdw_ce_loss() if args.loss_mode == "ordinal" else
+        make_balanced_ce_loss(y[train_idx]) if args.loss_mode == "balanced_ce" else
+        tf.keras.losses.CategoricalCrossentropy()
+    )
     model = build_modse2_hybrid()
     model.compile(
         optimizer=Adam(learning_rate=1e-4, use_ema=True, ema_momentum=0.999),
-        loss=make_cdw_ce_loss(),
+        loss=loss,
         metrics=["accuracy"],
     )
     weights_path = os.path.join(args.output_dir, "colonomind_v20_best.weights.h5")
     history_path = os.path.join(args.output_dir, "training_history.csv")
+    validation_metrics = ValidationMetrics(
+        val_sequence, y, val_idx, manifest["cohort"].astype(str).to_numpy()
+    ) if args.development_only else None
+    monitor = "val_selection_score" if args.development_only else "val_accuracy"
     callbacks = [
+        *([validation_metrics] if validation_metrics else []),
         EpochLogger(),
         CSVLogger(history_path),
-        ModelCheckpoint(weights_path, monitor="val_accuracy", mode="max", save_best_only=True, save_weights_only=True),
+        ModelCheckpoint(weights_path, monitor=monitor, mode="max", save_best_only=True, save_weights_only=True),
         EarlyStopping(
-            monitor="val_accuracy",
+            monitor=monitor,
             mode="max",
             patience=args.early_stopping_patience,
             start_from_epoch=args.minimum_epochs,
             restore_best_weights=True,
         ),
-        ReduceLROnPlateau(monitor="val_accuracy", mode="max", factor=0.5, patience=4, min_lr=1e-6),
+        ReduceLROnPlateau(monitor=monitor, mode="max", factor=0.5, patience=4, min_lr=1e-6),
     ]
 
     print(
         "Training Mod-SE(2) from scratch; "
         f"max_epochs={args.epochs}, early_stopping_start={args.minimum_epochs}, "
-        f"patience={args.early_stopping_patience}; test split held out until final evaluation.",
+        f"patience={args.early_stopping_patience}, loss={args.loss_mode}; "
+        f"development_only={args.development_only}.",
         flush=True,
     )
     started = time.time()
@@ -375,6 +438,25 @@ def main():
     )
     print(f"Training finished in {(time.time() - started) / 60:.1f} minutes", flush=True)
     model.load_weights(weights_path)
+
+    if args.development_only:
+        overall, by_cohort, probabilities = validation_metrics.evaluate()
+        report = {
+            "scope": "validation_only",
+            "loss_mode": args.loss_mode,
+            "split_manifest": args.manifest,
+            "selection_score": 0.7 * overall["exact_accuracy"] + 0.3 * overall["macro_f1"],
+            "validation": overall,
+            "validation_by_cohort": by_cohort,
+        }
+        with open(os.path.join(args.output_dir, "validation_evaluation.json"), "w") as f:
+            json.dump(report, f, indent=2)
+        np.savez_compressed(
+            os.path.join(args.output_dir, "validation_probabilities.npz"),
+            index=val_idx, label=y[val_idx], probability=probabilities,
+        )
+        print("Validation metrics:", json.dumps(report, indent=2), flush=True)
+        return
 
     test_sequence = HybridSequence(
         images, features, manifold, hard_targets, test_idx, args.batch_size, shuffle=False

@@ -4,56 +4,27 @@
 import argparse
 import json
 import os
-import re
-import subprocess
-import sys
 import time
 
 os.environ.setdefault("TF_FORCE_GPU_ALLOW_GROWTH", "true")
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
 
 
-def select_working_gpu():
-    if "CUDA_VISIBLE_DEVICES" in os.environ:
-        return
-
-    probe = """import tensorflow as tf
-gpus = tf.config.list_physical_devices('GPU')
-if not gpus:
-    raise SystemExit(1)
-for gpu in gpus:
-    tf.config.experimental.set_memory_growth(gpu, True)
-with tf.device('/GPU:0'):
-    y = tf.keras.layers.Conv2D(2, 3)(tf.zeros((1, 8, 8, 3)))
-    _ = y.numpy()
-"""
-    for index in (3, 0, 1, 2, 4, 5, 6, 7):
-        env = os.environ.copy()
-        env["CUDA_VISIBLE_DEVICES"] = str(index)
-        try:
-            result = subprocess.run(
-                [sys.executable, "-c", probe], env=env,
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                timeout=15, check=False,
-            )
-        except (OSError, subprocess.TimeoutExpired):
-            continue
-        if result.returncode == 0:
-            os.environ["CUDA_VISIBLE_DEVICES"] = str(index)
-            print(f"Selected operational GPU {index}", flush=True)
-            return
-
-    os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
-    print("No operational GPU found; using CPU", flush=True)
-
-
-select_working_gpu()
-
 import numpy as np
 import pandas as pd
 import cv2
 import joblib
 import tensorflow as tf
+
+gpu_devices = tf.config.list_physical_devices("GPU")
+if not gpu_devices:
+    raise RuntimeError(
+        "TensorFlow cannot see a GPU; refusing to run V20 training on CPU. "
+        "Check nvidia-smi, CUDA_VISIBLE_DEVICES, and the TensorFlow GPU install."
+    )
+for gpu in gpu_devices:
+    tf.config.experimental.set_memory_growth(gpu, True)
+print(f"TensorFlow {tf.__version__} using GPU devices: {gpu_devices}", flush=True)
 from sklearn.decomposition import PCA
 from sklearn.metrics import (
     accuracy_score,
@@ -212,6 +183,7 @@ def augment_image(image):
 
 class HybridSequence(Sequence):
     def __init__(self, images, features, manifold, targets, indices, batch_size, augment=False, shuffle=False):
+        super().__init__()
         self.images = images
         self.features = features
         self.manifold = manifold
@@ -232,7 +204,7 @@ class HybridSequence(Sequence):
             for i in range(len(images)):
                 images[i] = augment_image(images[i].astype(np.uint8)).astype(np.float32)
         return (
-            [images / 255.0, self.features[batch_ids], self.manifold[batch_ids]],
+            (images / 255.0, self.features[batch_ids], self.manifold[batch_ids]),
             self.targets[batch_ids],
         )
 
@@ -298,7 +270,6 @@ def main():
     tf.keras.utils.set_random_seed(args.seed)
     os.makedirs(args.output_dir, exist_ok=True)
 
-    print(f"TensorFlow {tf.__version__}; visible GPUs: {tf.config.list_physical_devices('GPU')}", flush=True)
     print("Loading V6 cache and V20 split manifest...", flush=True)
     with np.load(args.npz, allow_pickle=True) as data:
         images = data["imgs"]

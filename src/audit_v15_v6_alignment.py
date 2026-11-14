@@ -32,8 +32,10 @@ def main():
     parser.add_argument("--v15", default="../Result/ColonoMind_v15_AutoBalanced/dataset_cache_v15_384.npz")
     parser.add_argument("--manifest", default="Result/ColonoMind_V22/v22_feedback_splits.csv")
     parser.add_argument("--output", default="Result/ColonoMind_V22/cache_alignment.json")
-    parser.add_argument("--samples", type=int, default=256)
+    parser.add_argument("--samples-per-cohort", type=int, default=128)
     args = parser.parse_args()
+    if args.samples_per_cohort < 1:
+        parser.error("--samples-per-cohort must be positive")
 
     with np.load(args.v6, allow_pickle=True) as data:
         labels6 = data["labels"].astype(str)
@@ -57,14 +59,27 @@ def main():
     rank6 = rank_columns(features6[:, 20:27])
     rank15 = rank_columns(features15[:, 20:27])
     rng = np.random.default_rng(42)
-    chosen = rng.choice(len(labels6), size=min(args.samples, len(labels6)), replace=False)
+    chosen = np.concatenate([
+        rng.choice(
+            np.flatnonzero(cohorts15 == cohort),
+            size=min(args.samples_per_cohort, int(np.sum(cohorts15 == cohort))),
+            replace=False,
+        )
+        for cohort in sorted(set(cohorts15))
+    ])
     rows = []
     for index in chosen:
         pool = np.flatnonzero((labels6 == labels6[index]) & (cohorts15 == cohorts15[index]))
         distances = np.linalg.norm(rank15[pool] - rank6[index], axis=1)
         own = distances[np.flatnonzero(pool == index)[0]]
         percentile = float(np.mean(distances < own))
-        rows.append({"cohort": cohorts15[index], "percentile": percentile, "nearest": bool(np.argmin(distances) == np.flatnonzero(pool == index)[0])})
+        rows.append({
+            "index": int(index),
+            "cohort": cohorts15[index],
+            "percentile": percentile,
+            "nearest": bool(np.argmin(distances) == np.flatnonzero(pool == index)[0]),
+            "nearest_index": int(pool[np.argmin(distances)]),
+        })
 
     shape6, dtype6 = image_shape(args.v6)
     shape15, dtype15 = image_shape(args.v15)
@@ -85,6 +100,11 @@ def main():
         report["by_cohort"][cohort] = {
             "samples": len(subset),
             "top_one_percent_fraction": float(np.mean([row["percentile"] <= 0.01 for row in subset])) if subset else None,
+            "nearest_fraction": float(np.mean([row["nearest"] for row in subset])) if subset else None,
+            "worst_indices": [
+                {"index": row["index"], "nearest_index": row["nearest_index"], "percentile": row["percentile"]}
+                for row in sorted(subset, key=lambda item: item["percentile"], reverse=True)[:3]
+            ],
         }
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)

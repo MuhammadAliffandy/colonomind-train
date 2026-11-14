@@ -55,8 +55,10 @@ def main():
         images = data["imgs"]
         raw_features = data["feats"].astype(np.float32)
         names = np.asarray(data["labels"], dtype=str)
-    if images.shape[1:] != (256, 256, 3) or raw_features.shape != (len(images), 28):
-        raise ValueError("V22 requires aligned 256x256 RGB images and 28 biomarkers")
+    image_shape = tuple(images.shape[1:])
+    if image_shape not in ((256, 256, 3), (384, 384, 3)) or raw_features.shape != (len(images), 28):
+        raise ValueError("V22 requires aligned 256x256 or 384x384 RGB images and 28 biomarkers")
+    print("Image shape:", image_shape, flush=True)
     frame = pd.read_csv(args.manifest, dtype={"patient_id": str}).sort_values("index").reset_index(drop=True)
     if len(frame) != len(names) or frame["index"].tolist() != list(range(len(names))):
         raise ValueError("Manifest indices do not align with the NPZ")
@@ -90,7 +92,7 @@ def main():
             shuffle=shuffle,
         )
 
-    model = build_modse2_hybrid()
+    model = build_modse2_hybrid(img_shape=image_shape)
     model.compile(
         optimizer=Adam(learning_rate=1e-4, use_ema=True, ema_momentum=0.999),
         loss=make_balanced_ce_loss(y[train]),
